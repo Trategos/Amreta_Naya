@@ -1,11 +1,9 @@
 streamlit
 pydeck
 requests
-# Geo stack (Cloud-compatible)
 geopandas
 pyogrio
 shapely
 rtree
 fiona
-# Optional but recommended
 pandas
