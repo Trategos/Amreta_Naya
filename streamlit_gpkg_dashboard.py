@@ -1,9 +1,16 @@
+"""
+Streamlit interactive dashboard for a GeoPackage (.gpkg)
+Updated with:
+- Dynamic color scale based on selected attribute
+- Automatic map refresh when column changes
+- Natural Breaks (Jenks) + blue→red gradient
+"""
+
 import streamlit as st
 import geopandas as gpd
 import pandas as pd
 import fiona
 import io
-import os
 from streamlit_folium import st_folium
 import folium
 import matplotlib.pyplot as plt
@@ -36,10 +43,8 @@ def list_layers(path_or_url: str):
 def load_layer(path_or_url: str, layer_name: str = None):
     try:
         if layer_name:
-            gdf = gpd.read_file(path_or_url, layer=layer_name)
-        else:
-            gdf = gpd.read_file(path_or_url)
-        return gdf
+            return gpd.read_file(path_or_url, layer=layer_name)
+        return gpd.read_file(path_or_url)
     except Exception as e:
         st.error(f"Failed to read file or layer: {e}")
         return None
@@ -51,6 +56,7 @@ def safe_to_crs(gdf, crs="EPSG:4326"):
     except Exception:
         return gdf
 
+
 # -----------------------------------------------------------
 # SIDEBAR – DATA SOURCE
 # -----------------------------------------------------------
@@ -60,9 +66,7 @@ load_mode = st.sidebar.radio("Load GPKG from", ["HuggingFace (default)", "Custom
 if load_mode == "HuggingFace (default)":
     gpkg_path = st.sidebar.text_input("Remote GPKG URL", DEFAULT_REMOTE_URL)
 else:
-    gpkg_path = st.sidebar.text_input(
-        "Enter any raw/remote GPKG URL", "https://.../file.gpkg"
-    )
+    gpkg_path = st.sidebar.text_input("Enter GPKG URL", "https://.../file.gpkg")
 
 if not gpkg_path:
     st.stop()
@@ -73,30 +77,27 @@ if not gpkg_path:
 st.sidebar.markdown("---")
 st.sidebar.write("### Layer selection")
 
-with st.spinner("Listing layers..."):
-    layers = list_layers(gpkg_path)
+layers = list_layers(gpkg_path)
 
 if not layers:
-    st.sidebar.warning("No layers found or could not read layer list.")
-    chosen_layer = None
-else:
-    chosen_layer = st.sidebar.selectbox("Choose layer", layers)
+    st.sidebar.warning("No layers found.")
+    st.stop()
+
+chosen_layer = st.sidebar.selectbox("Choose layer", layers)
 
 # -----------------------------------------------------------
 # LOAD SELECTED LAYER
 # -----------------------------------------------------------
 st.title("GeoPackage (GPKG) Explorer — Interactive Dashboard")
 
-with st.spinner("Loading selected layer…"):
-    gdf = load_layer(gpkg_path, chosen_layer)
-
+gdf = load_layer(gpkg_path, chosen_layer)
 if gdf is None:
     st.stop()
 
 gdf = safe_to_crs(gdf)
 
 # -----------------------------------------------------------
-# TOP INFO
+# TOP SUMMARY
 # -----------------------------------------------------------
 col1, col2, col3 = st.columns([3, 1.5, 1.5])
 with col1:
@@ -106,7 +107,7 @@ with col1:
 
 with col2:
     st.metric("Columns", len(gdf.columns))
-    geom_types = gdf.geometry.geom_type.value_counts().to_dict()
+    geom_types = gdf.geometry.geom_type.value_counts()
     st.write("Geometry types:")
     for gt, ct in geom_types.items():
         st.write(f"- {gt}: {ct}")
@@ -118,7 +119,7 @@ with col3:
 st.markdown("---")
 
 # -----------------------------------------------------------
-# SIDEBAR – ATTRIBUTES & FILTERS
+# SIDEBAR – ATTRIBUTE + FILTERS
 # -----------------------------------------------------------
 st.sidebar.write("### Attribute Visualization")
 
@@ -131,18 +132,20 @@ is_numeric = pd.api.types.is_numeric_dtype(gdf[chosen_x])
 filtered = gdf.copy()
 st.sidebar.write("### Filters")
 
+# Numeric filter
 if is_numeric:
-    minv = float(gdf[chosen_x].min())
-    maxv = float(gdf[chosen_x].max())
+    minv, maxv = float(gdf[chosen_x].min()), float(gdf[chosen_x].max())
     rmin, rmax = st.sidebar.slider(f"Filter {chosen_x}", minv, maxv, (minv, maxv))
     filtered = filtered[(filtered[chosen_x] >= rmin) & (filtered[chosen_x] <= rmax)]
+
+# Categorical filter
 else:
     unique_vals = sorted(filtered[chosen_x].dropna().unique().tolist())
     sel = st.sidebar.multiselect(f"Select values in {chosen_x}", unique_vals)
     if sel:
         filtered = filtered[filtered[chosen_x].isin(sel)]
 
-# Optional text search
+# Optional text filter
 text_col = st.sidebar.selectbox("Optional text search column", [None] + columns_no_geom)
 if text_col:
     q = st.sidebar.text_input("Search text")
@@ -156,8 +159,8 @@ st.subheader("Interactive Map")
 
 # Center map
 try:
-    c = filtered.geometry.unary_union.centroid
-    center = [c.y, c.x]
+    cent = filtered.geometry.unary_union.centroid
+    center = [cent.y, cent.x]
 except Exception:
     center = [0, 0]
 
@@ -168,43 +171,46 @@ map_tiles = st.sidebar.selectbox(
 m = folium.Map(location=center, zoom_start=8, tiles=map_tiles)
 
 # -----------------------------------------------------------
-# NEW — Natural Breaks + Blue→Red gradient styling
+# CHOROPLETH — AUTOMATIC COLOR UPDATES BASED ON SELECTED COLUMN
 # -----------------------------------------------------------
+cmap = None
+
 if is_numeric and len(filtered) > 0:
 
     st.sidebar.write("### Choropleth Options")
     method = st.sidebar.selectbox(
         "Classification method",
         ["natural_breaks (Jenks)", "quantiles", "equal_interval"],
-        index=0  # default = Jenks
+        index=0
     )
 
     bins = st.sidebar.slider("Classes", 3, 9, 5)
 
+    values = filtered[chosen_x].astype(float)
+
     try:
+        # --- Recompute classification whenever user changes the column ---
         if method == "natural_breaks (Jenks)":
-            classifier = mapclassify.NaturalBreaks(filtered[chosen_x], k=bins)
+            classifier = mapclassify.NaturalBreaks(values, k=bins)
         elif method == "quantiles":
-            classifier = mapclassify.Quantiles(filtered[chosen_x], k=bins)
+            classifier = mapclassify.Quantiles(values, k=bins)
         else:
-            classifier = mapclassify.EqualInterval(filtered[chosen_x], k=bins)
+            classifier = mapclassify.EqualInterval(values, k=bins)
 
         filtered["_class"] = classifier.yb
 
-        # Blue → Red gradient color scale
-        cmap = cm.linear.Blues_09.to_Reds_09
-        cmap = cmap.scale(filtered[chosen_x].min(), filtered[chosen_x].max())
+        # --- Rebuild color scale based on actual range of chosen attribute ---
+        vmin, vmax = values.min(), values.max()
+        cmap = cm.linear.Blues_09.to_Reds_09.scale(vmin, vmax)
 
     except Exception as e:
         st.warning(f"Classification failed: {e}")
         filtered["_class"] = -1
-        cmap = cm.LinearColormap(["grey", "grey"])
+        cmap = cm.LinearColormap(["#cccccc", "#cccccc"])  # fallback
 
-else:
-    cmap = None
 
 # -----------------------------------------------------------
-# Add GeoJSON
+# GEOJSON STYLING — ALWAYS USE CURRENT ATTRIBUTE VALUE
 # -----------------------------------------------------------
 popup_fields = st.multiselect(
     "Popup fields", columns_no_geom, default=columns_no_geom[:5]
@@ -213,15 +219,16 @@ popup_fields = st.multiselect(
 def style_function(feature):
     value = feature["properties"].get(chosen_x)
 
-    if (not is_numeric) or value is None:
-        return {"fillOpacity": 0.3, "weight": 0.5, "color": "black"}
+    if cmap is None or value is None:
+        return {"fillOpacity": 0.3, "color": "black", "weight": 0.3}
 
     return {
         "fillColor": cmap(value),
         "color": "black",
         "weight": 0.25,
-        "fillOpacity": 0.8,
+        "fillOpacity": 0.85,
     }
+
 
 gjson = folium.GeoJson(
     filtered.to_json(),
@@ -230,7 +237,7 @@ gjson = folium.GeoJson(
     popup=folium.GeoJsonPopup(fields=popup_fields, labels=True),
 ).add_to(m)
 
-# add legend
+# Add legend
 if cmap:
     cmap.add_to(m)
 
@@ -272,4 +279,4 @@ st.download_button(
     mime="application/geo+json",
 )
 
-st.success("Dashboard updated with Natural Breaks + Blue→Red gradient.")
+st.success("Map updates automatically based on selected attribute.")
