@@ -168,9 +168,18 @@ else:
     except:
         st.warning(f"Could not fetch metrics HTML for: {metrics_filename}")
 
-# 3️⃣ Show HTML (if available)
+# 3️⃣ Show HTML (AUTO-SIZING IFRAME — NO SCROLLBARS)
 if html_content:
-    components.html(html_content, height=450, scrolling=True)
+    safe_html = html_content.replace('"', '&quot;')  # prevent iframe breaking
+    iframe_html = f"""
+        <iframe id="metricsFrame" srcdoc="{safe_html}"
+            style="width:100%; border:none;"
+            onload="
+                this.style.height=this.contentWindow.document.body.scrollHeight + 'px';
+            ">
+        </iframe>
+    """
+    components.html(iframe_html, height=1500, scrolling=False)
 else:
     st.info(f"No metrics file found for: {metrics_filename}")
 
