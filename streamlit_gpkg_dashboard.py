@@ -49,63 +49,92 @@ def safe_to_crs(gdf, crs="EPSG:4326"):
     except Exception:
         return gdf
 
-def add_vertical_colormap_to_map(map_obj, cmap, title, top_px=80, left_px=20, height_px=300, width_px=48):
-    """
-    Insert a fixed-position vertical colormap in the map's HTML. Uses the branca colormap _repr_html_().
-    This function rotates the colormap SVG to make it vertical and keeps labels readable.
-    """
-    # The _repr_html_() typically renders a horizontal SVG. We add CSS to rotate / size it and place it in a fixed div.
-    cmap_html = cmap._repr_html_()
+def add_vertical_colormap_to_map(map_obj, cmap, title, top_px=80, left_px=20):
+    import json
 
+    # --- Extract gradient colors ---
+    steps = 40
+    colors = [cmap(x/steps) for x in range(steps + 1)]
+    css_gradient = ", ".join(colors)
+
+    vmin = round(cmap.vmin, 4)
+    vmax = round(cmap.vmax, 4)
+
+    # --- Main Legend HTML + CSS ---
     legend_html = f"""
-    <div class="vertical-legend" style="
+    <style>
+    .draggable-legend {{
         position: fixed;
         top: {top_px}px;
         left: {left_px}px;
-        z-index: 9999;
-        width: {width_px}px;
-        height: {height_px}px;
-        background-color: rgba(255,255,255,0.95);
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        padding: 6px;
-        box-shadow: 0 0 6px rgba(0,0,0,0.25);
+        z-index: 999999;
+        width: 70px;
+        background: white;
+        padding: 10px 8px;
+        border-radius: 10px;
+        border: 1px solid #bbb;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.25);
         font-family: Arial, sans-serif;
+        text-align: center;
+        cursor: move;
+        user-select: none;
+    }}
+
+    .gradient-box {{
+        height: 200px;
+        width: 24px;
+        margin: 6px auto;
+        background: linear-gradient(to bottom, {css_gradient});
+        border-radius: 4px;
+        border: 1px solid #999;
+    }}
+
+    .legend-title {{
         font-size: 12px;
-    ">
-      <div style="text-align:center; font-weight:600; margin-bottom:6px;">{title}</div>
+        font-weight: bold;
+        margin-bottom: 4px;
+    }}
 
-      <div style="display:flex; align-items:center; justify-content:center; height:{height_px-40}px;">
-        {cmap_html}
-      </div>
-    </div>
-
-    <style>
-    /* Tweak the generated linear-colormap to display vertically */
-    .vertical-legend .linear-colormap {{
-        width: {height_px-60}px !important;    /* swap dims because we'll rotate */
-        height: {width_px-12}px !important;
-        padding: 0 !important;
-        margin: 0 !important;
-    }}
-    .vertical-legend .linear-colormap svg {{
-        transform: rotate(-90deg);
-        transform-origin: left top;
-    }}
-    /* Reduce caption text size if present */
-    .vertical-legend .linear-colormap .caption {{
-        font-size: 10px !important;
-    }}
-    /* Hide any extra margins that could push widget outside the box */
-    .vertical-legend .linear-colormap svg rect, 
-    .vertical-legend .linear-colormap svg text {{
-        shape-rendering: crispEdges;
+    .legend-value {{
+        font-size: 11px;
+        margin-top: 4px;
     }}
     </style>
+
+    <div id="legend" class="draggable-legend">
+        <div class="legend-title">{title}</div>
+        <div class="gradient-box"></div>
+        <div class="legend-value">{vmax}</div>
+        <div class="legend-value">{vmin}</div>
+    </div>
+
+    <script>
+    // Make legend draggable
+    const legend = document.getElementById("legend");
+    let offsetX, offsetY, isDown = false;
+
+    legend.addEventListener("mousedown", function(e) {{
+        isDown = true;
+        offsetX = legend.offsetLeft - e.clientX;
+        offsetY = legend.offsetTop - e.clientY;
+    }});
+
+    document.addEventListener("mouseup", function() {{
+        isDown = false;
+    }});
+
+    document.addEventListener("mousemove", function(e) {{
+        if (isDown) {{
+            const newX = e.clientX + offsetX;
+            const newY = e.clientY + offsetY;
+            legend.style.left = newX + "px";
+            legend.style.top = newY + "px";
+        }}
+    }});
+    </script>
     """
 
     map_obj.get_root().html.add_child(folium.Element(legend_html))
-
 
 # -----------------------------------------------------------
 # SIDEBAR – DATA SOURCE
@@ -370,3 +399,4 @@ except Exception as e:
     st.error(f"Failed to prepare download: {e}")
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
