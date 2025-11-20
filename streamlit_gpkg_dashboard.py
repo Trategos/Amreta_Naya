@@ -355,7 +355,7 @@ else:
 
     # Extract from CSV
     benefit = parse_rupiah(row["Benefit"])
-    baseline_bcr = float(row["BCR"])   # CSV already includes BCR
+    baseline_bcr = float(row["Nilai BCR"])   # CSV already includes BCR
     base_cost = benefit / baseline_bcr  # Derive cost
 
     # Display baseline values
@@ -425,6 +425,7 @@ else:
             st.write(f"**Your Cost:** Rp {new_cost:,.0f}")
 
             draw_donut(benefit, new_cost, new_bcr, "Updated BCR")
+
 
 
 
