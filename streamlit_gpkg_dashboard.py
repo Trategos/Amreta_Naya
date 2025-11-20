@@ -1,8 +1,7 @@
-# Updated Streamlit GPKG Explorer with vertical bottom-left legend
-
 """
 Streamlit interactive dashboard for a GeoPackage (.gpkg)
-Updated: Vertical legend (bottom-left), clear bin ranges, toggle added.
+Updated: Removed text search, fixed interactive color scaling,
+added natural breaks & color palettes.
 """
 
 import streamlit as st
@@ -53,78 +52,6 @@ def safe_to_crs(gdf, crs="EPSG:4326"):
 
 
 # -----------------------------------------------------------
-# VERTICAL LEGEND FUNCTION
-# -----------------------------------------------------------
-def add_vertical_legend(map_obj, cmap, bin_edges, title="Legend"):
-    """Attach a vertical legend with bin ranges."""
-    from folium import MacroElement
-    from branca.element import Template
-
-    legend_html = f"""
-    <div id='legend' class='vertical-legend'>
-        <h4>{title}</h4>
-    """
-
-    for i in range(len(bin_edges) - 1):
-        vmin = bin_edges[i]
-        vmax = bin_edges[i + 1]
-        color = cmap((vmin + vmax) / 2)
-
-        legend_html += f"""
-        <div class="legend-item">
-            <span class="legend-color" style="background:{color};"></span>
-            <span class="legend-label">{vmin:.2f} – {vmax:.2f}</span>
-        </div>
-        """
-
-    legend_html += "</div>"
-
-    macro = MacroElement()
-    macro._template = Template(legend_html)
-    map_obj.get_root().add_child(macro)
-
-
-# -----------------------------------------------------------
-# LEGEND CSS
-# -----------------------------------------------------------
-legend_css = """
-<style>
-.vertical-legend {
-    position: absolute;
-    bottom: 20px;
-    left: 20px;
-    z-index: 9999;
-    background: rgba(255,255,255,0.95);
-    padding: 12px;
-    border-radius: 8px;
-    box-shadow: 0 0 8px rgba(0,0,0,0.25);
-    font-size: 14px;
-}
-.vertical-legend h4 {
-    margin: 0 0 8px 0;
-    font-size: 15px;
-    font-weight: 600;
-}
-.legend-item {
-    display: flex;
-    align-items: center;
-    margin-bottom: 6px;
-}
-.legend-color {
-    width: 18px;
-    height: 18px;
-    margin-right: 8px;
-    border: 1px solid #999;
-}
-.legend-label {
-    font-size: 13px;
-}
-</style>
-"""
-st.markdown(legend_css, unsafe_allow_html=True)
-
-
-# -----------------------------------------------------------
 # SIDEBAR – DATA SOURCE
 # -----------------------------------------------------------
 st.sidebar.title("Data Source")
@@ -167,7 +94,6 @@ if gdf is None:
 
 gdf = safe_to_crs(gdf)
 
-
 # -----------------------------------------------------------
 # TOP INFO
 # -----------------------------------------------------------
@@ -190,7 +116,6 @@ with col3:
         st.dataframe(gdf.head(200))
 
 st.markdown("---")
-
 
 # -----------------------------------------------------------
 # SIDEBAR – ATTRIBUTES & FILTERS
@@ -220,7 +145,6 @@ else:
     if sel:
         filtered = filtered[filtered[chosen_x].isin(sel)]
 
-
 # -----------------------------------------------------------
 # MAP
 # -----------------------------------------------------------
@@ -240,13 +164,10 @@ map_tiles = st.sidebar.selectbox(
 
 m = folium.Map(location=center, zoom_start=8, tiles=map_tiles)
 
-
 # -----------------------------------------------------------
-# CHOROPLETH
+# CHOROPLETH: Natural breaks and color ramps
 # -----------------------------------------------------------
 cmap = None
-classifier = None
-bin_edges = None
 
 if is_numeric and len(filtered) > 0:
 
@@ -281,27 +202,28 @@ if is_numeric and len(filtered) > 0:
             classifier = mapclassify.EqualInterval(values, k=bins)
 
         filtered["_class"] = classifier.yb
-        bin_edges = classifier.bins
-        cmap = getattr(cm.linear, palette_name).scale(bin_edges[0], bin_edges[-1])
+
+        # Colormap
+        vmin, vmax = values.min(), values.max()
+        cmap = getattr(cm.linear, palette_name).scale(vmin, vmax)
 
     except Exception as e:
         st.warning(f"Classification failed: {e}")
         filtered["_class"] = -1
         cmap = cm.LinearColormap(["#cccccc", "#cccccc"])
 
-
 # Style function
 def style_function(feature):
     value = feature["properties"].get(chosen_x)
     if cmap is None or value is None:
         return {"fillOpacity": 0.3, "color": "black", "weight": 0.3}
+
     return {
         "fillColor": cmap(value),
         "color": "black",
         "weight": 0.25,
         "fillOpacity": 0.85,
     }
-
 
 # Add GeoJSON
 popup_fields = st.multiselect(
@@ -315,24 +237,13 @@ folium.GeoJson(
     popup=folium.GeoJsonPopup(fields=popup_fields, labels=True),
 ).add_to(m)
 
+if cmap:
+    cmap.add_to(m)
 
-# -----------------------------------------------------------
-# VERTICAL LEGEND (TOGGLE)
-# -----------------------------------------------------------
-show_legend = st.sidebar.checkbox("Show legend", True)
-
-if show_legend and cmap and bin_edges is not None:
-    add_vertical_legend(m, cmap, bin_edges, title=chosen_x)
-
-
-# -----------------------------------------------------------
-# DISPLAY MAP
-# -----------------------------------------------------------
 st_folium(m, height=600, width=1000)
 
-
 # -----------------------------------------------------------
-# STATISTICS
+# STATS & CHARTS
 # -----------------------------------------------------------
 st.subheader("Statistics & Charts")
 colA, colB = st.columns(2)
@@ -351,7 +262,6 @@ if is_numeric:
     filtered[chosen_x].plot.hist(ax=ax, bins=30)
     ax.set_title(f"Histogram of {chosen_x}")
     st.pyplot(fig)
-
 
 # -----------------------------------------------------------
 # DOWNLOAD
