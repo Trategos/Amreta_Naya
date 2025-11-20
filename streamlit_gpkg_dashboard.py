@@ -146,15 +146,14 @@ hf_url = (
     + metrics_filename
 )
 
-st.markdown("## Scenario Metrics")
+st.markdown("## Flood Risk Information")
 
 html_content = None
 
-# 1️⃣ Try local file
+# 1️⃣ Try local metrics file
 if os.path.exists(local_path):
     with open(local_path, "r", encoding="utf-8") as f:
         html_content = f.read()
-    st.success(f"Loaded local metrics file: {metrics_filename}")
 
 # 2️⃣ Try HuggingFace fallback
 else:
@@ -447,6 +446,7 @@ else:
             st.write(f"**Your Cost:** Rp {new_cost:,.0f}")
 
             draw_donut(benefit, new_cost, new_bcr, "Updated BCR")
+
 
 
 
