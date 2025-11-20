@@ -161,11 +161,8 @@ else:
         r = requests.get(hf_url)
         if r.status_code == 200:
             html_content = r.text
-            st.info(f"Loaded metrics file from HuggingFace: {metrics_filename}")
-        else:
-            st.warning(f"Metrics file not found on HuggingFace: {metrics_filename}")
     except:
-        st.warning(f"Could not fetch metrics HTML for: {metrics_filename}")
+        pass
 
 # 3️⃣ Show HTML (bigger box to prevent map layout issues)
 
@@ -446,6 +443,7 @@ else:
             st.write(f"**Your Cost:** Rp {new_cost:,.0f}")
 
             draw_donut(benefit, new_cost, new_bcr, "Updated BCR")
+
 
 
 
