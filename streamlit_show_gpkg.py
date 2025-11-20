@@ -1,114 +1,88 @@
 import streamlit as st
-import geopandas as gpd
-import leafmap.foliumap as leafmap
-import gdown
 import os
-import time
+import geopandas as gpd
+from folium import Map, GeoJson
+from streamlit_folium import st_folium
+import requests
+import tempfile
+
+st.set_page_config(page_title="GPKG Viewer", layout="wide")
+
+def download_from_gdrive(url):
+    """Download a Google Drive large file using file ID token."""
+    if "id=" in url:
+        file_id = url.split("id=")[1]
+    elif "/d/" in url:
+        file_id = url.split("/d/")[1].split("/")[0]
+    else:
+        raise ValueError("Invalid Google Drive link format.")
+
+    download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+
+    session = requests.Session()
+    response = session.get(download_url, stream=True)
+
+    # Handle large-file confirmation token
+    for key, value in response.cookies.items():
+        if key.startswith("download_warning"):
+            download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={value}"
+            response = session.get(download_url, stream=True)
+            break
+
+    # Save to temp file
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".gpkg")
+    with open(tmp.name, "wb") as f:
+        for chunk in response.iter_content(32768):
+            if chunk:
+                f.write(chunk)
+
+    return tmp.name
 
 
-# ================================================================
-# GOOGLE DRIVE CONFIG (YOUR FILE)
-# ================================================================
-FILE_ID = "1mm8RVDsImtHyal5h8UuCz4hOVCigolf2"
-OUTPUT_PATH = "/tmp/dataset.gpkg"
-TIMESTAMP_PATH = "/tmp/dataset_timestamp.txt"
-
-
-# ================================================================
-# FORCE DOWNLOAD CONTROL
-# ================================================================
-force_refresh = st.sidebar.button("🔄 Force Re-download GPKG")
-
-
-# ================================================================
-# DOWNLOAD FUNCTION
-# ================================================================
-@st.cache_data(show_spinner=True)
-def download_gpkg(force=False):
-    """Download the GPKG from Google Drive unless forced."""
-    
-    # If file already exists and refresh not requested → keep cached
-    if os.path.exists(OUTPUT_PATH) and not force:
-        return OUTPUT_PATH
-
-    # Google Drive direct download link
-    url = f"https://drive.google.com/uc?id={FILE_ID}"
-
-    # Download file
-    gdown.download(url, OUTPUT_PATH, quiet=False, fuzzy=True)
-
-    # Save timestamp
-    with open(TIMESTAMP_PATH, "w") as f:
-        f.write(str(time.time()))
-
-    return OUTPUT_PATH
-
-
-# ================================================================
-# EXECUTE DOWNLOAD
-# ================================================================
-gpkg_path = download_gpkg(force_refresh)
-
-# Timestamp display
-if os.path.exists(TIMESTAMP_PATH):
-    last_download = float(open(TIMESTAMP_PATH).read())
-    st.sidebar.success(
-        f"📥 GPKG last downloaded:\n"
-        f"**{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_download))}**"
-    )
-else:
-    st.sidebar.info("GPKG not downloaded yet.")
-
-
-# ================================================================
-# APP TITLE
-# ================================================================
-st.title("📍 GPKG Viewer from Google Drive (Streamlit + Leafmap)")
-
-
-# ================================================================
-# LOAD LAYERS
-# ================================================================
-try:
-    layers = gpd.io.file.fiona.listlayers(gpkg_path)
-except Exception as e:
-    st.error(f"Failed to read layers: {e}")
-    st.stop()
-
-layer = st.selectbox("Choose a layer", layers)
-
-
-# ================================================================
-# LOAD SELECTED LAYER
-# ================================================================
-@st.cache_data(show_spinner=True)
-def load_layer(path, layername):
-    gdf = gpd.read_file(path, layer=layername)
+def load_gpkg_layers(gpkg_path):
+    """Return list of layer names and the first layer GeoDataFrame."""
     try:
-        gdf = gdf.to_crs(4326)
-    except:
-        pass
-    return gdf
+        layers = gpd.io.file.fiona.listlayers(gpkg_path)
+        return layers
+    except Exception as e:
+        st.error(f"❌ Failed to read layers: {e}")
+        return None
 
 
-with st.spinner("Loading GeoDataFrame..."):
-    gdf = load_layer(gpkg_path, layer)
+def load_layer(gpkg_path, layer_name):
+    try:
+        return gpd.read_file(gpkg_path, layer=layer_name)
+    except Exception as e:
+        st.error(f"❌ Failed loading layer: {e}")
+        return None
 
-st.subheader("📄 Data Preview")
-st.dataframe(gdf.head())
 
+st.title("🌍 GPKG File Viewer (Google Drive)")
 
-# ================================================================
-# MAP VIEW
-# ================================================================
-st.subheader("🗺️ Map Viewer")
+url = st.text_input("Enter Google Drive link:", 
+    "https://drive.google.com/file/d/1yXLhlEOvd7AVHc9-9n8ZjLFCLjCR1C6y/view?usp=drive_link")
 
-if gdf.empty:
-    st.warning("Layer contains no features.")
-else:
-    m = leafmap.Map(center=[gdf.geometry.centroid.y.mean(),
-                            gdf.geometry.centroid.x.mean()],
-                    zoom=10)
+if st.button("Load GPKG"):
+    with st.spinner("Downloading from Google Drive…"):
+        gpkg_path = download_from_gdrive(url)
 
-    m.add_gdf(gdf, layer_name=layer)
-    m.to_streamlit(height=600)
+    st.success(f"GPKG downloaded: {gpkg_path}")
+
+    layers = load_gpkg_layers(gpkg_path)
+
+    if layers:
+        st.success(f"Available layers: {layers}")
+        layer_name = st.selectbox("Select a layer", layers)
+
+        gdf = load_layer(gpkg_path, layer_name)
+
+        if gdf is not None and not gdf.empty:
+
+            center = [gdf.geometry.iloc[0].centroid.y, gdf.geometry.iloc[0].centroid.x]
+            m = Map(location=center, zoom_start=11)
+
+            GeoJson(gdf).add_to(m)
+
+            st_folium(m, width=1000, height=600)
+        else:
+            st.error("Layer loaded but empty or invalid.")
