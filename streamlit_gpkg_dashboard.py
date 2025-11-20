@@ -58,20 +58,20 @@ DEFAULT_LABEL = "Digital Twin Flood Adaptation Planning"
 # -----------------------------------------------------------
 st.sidebar.title("Data Source")
 
-load_mode = st.sidebar.radio(
-    "Load GPKG from",
-    ["Choose from list", "Custom URL"]
-)
-
 if load_mode == "Choose from list":
-    chosen_label = st.sidebar.selectbox("Select dataset", list(GPKG_OPTIONS.keys()), index=list(GPKG_OPTIONS.keys()).index(DEFAULT_LABEL))
+    labels = list(GPKG_OPTIONS.keys())
+
+    # Safe default index
+    default_index = labels.index(DEFAULT_LABEL) if DEFAULT_LABEL in labels else 0
+
+    chosen_label = st.sidebar.selectbox(
+        "Select dataset",
+        labels,
+        index=default_index
+    )
+
     gpkg_path = GPKG_OPTIONS[chosen_label]
 
-else:  # Custom URL
-    gpkg_path = st.sidebar.text_input("Enter remote GPKG URL", "https://.../file.gpkg")
-
-if not gpkg_path:
-    st.stop()
 
 # -----------------------------------------------------------
 # LOAD LAYERS
@@ -286,4 +286,5 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
 
