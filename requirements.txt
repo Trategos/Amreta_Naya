@@ -1,9 +1,8 @@
 streamlit
 geopandas
-requests
-fiona
 folium
-streamlit-folium
+fiona
 shapely
 pyproj
-rtree
+requests
+streamlit-folium
