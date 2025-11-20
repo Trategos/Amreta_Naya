@@ -1,6 +1,8 @@
+# Updated Streamlit GPKG Explorer with bottom-left legend and toggle
+
 """
 Streamlit interactive dashboard for a GeoPackage (.gpkg)
-Updated with bottom-left Requirements section.
+Updated: Legend fixed (bottom-left), overlapping removed, toggle added.
 """
 
 import streamlit as st
@@ -35,7 +37,6 @@ def list_layers(path_or_url: str):
         st.warning(f"Could not list layers: {e}")
         return []
 
-
 @st.cache_data(show_spinner=True)
 def load_layer(path_or_url: str, layer_name: str = None):
     try:
@@ -44,13 +45,11 @@ def load_layer(path_or_url: str, layer_name: str = None):
         st.error(f"Failed to read file or layer: {e}")
         return None
 
-
 def safe_to_crs(gdf, crs="EPSG:4326"):
     try:
         return gdf.to_crs(crs)
     except Exception:
         return gdf
-
 
 # -----------------------------------------------------------
 # SIDEBAR – DATA SOURCE
@@ -134,6 +133,7 @@ filtered = gdf.copy()
 
 st.sidebar.write("### Filters")
 
+# Numeric filtering
 if is_numeric:
     minv = float(gdf[chosen_x].min())
     maxv = float(gdf[chosen_x].max())
@@ -150,6 +150,7 @@ else:
 # -----------------------------------------------------------
 st.subheader("Interactive Map")
 
+# Center map
 try:
     c = filtered.geometry.unary_union.centroid
     center = [c.y, c.x]
@@ -164,9 +165,11 @@ map_tiles = st.sidebar.selectbox(
 m = folium.Map(location=center, zoom_start=8, tiles=map_tiles)
 
 # -----------------------------------------------------------
-# CHOROPLETH: Natural breaks and color ramps
+# CHOROPLETH
 # -----------------------------------------------------------
 cmap = None
+classifier = None
+bin_edges = None
 
 if is_numeric and len(filtered) > 0:
 
@@ -192,6 +195,7 @@ if is_numeric and len(filtered) > 0:
     values = filtered[chosen_x].astype(float)
 
     try:
+        # Classification
         if method == "natural_breaks (Jenks)":
             classifier = mapclassify.NaturalBreaks(values, k=bins)
         elif method == "quantiles":
@@ -201,20 +205,22 @@ if is_numeric and len(filtered) > 0:
 
         filtered["_class"] = classifier.yb
 
-        vmin, vmax = values.min(), values.max()
-        cmap = getattr(cm.linear, palette_name).scale(vmin, vmax)
+        # Use classification boundaries for legend
+        bin_edges = classifier.bins
+        cmap = getattr(cm.linear, palette_name).scale(bin_edges[0], bin_edges[-1])
+        cmap.caption = f"{chosen_x} ({method})"
 
     except Exception as e:
         st.warning(f"Classification failed: {e}")
         filtered["_class"] = -1
         cmap = cm.LinearColormap(["#cccccc", "#cccccc"])
 
-# Style
+# Style function
+
 def style_function(feature):
     value = feature["properties"].get(chosen_x)
     if cmap is None or value is None:
         return {"fillOpacity": 0.3, "color": "black", "weight": 0.3}
-
     return {
         "fillColor": cmap(value),
         "color": "black",
@@ -222,7 +228,7 @@ def style_function(feature):
         "fillOpacity": 0.85,
     }
 
-# Popup fields
+# Add GeoJSON
 popup_fields = st.multiselect(
     "Popup fields", columns_no_geom, default=columns_no_geom[:5]
 )
@@ -234,13 +240,36 @@ folium.GeoJson(
     popup=folium.GeoJsonPopup(fields=popup_fields, labels=True),
 ).add_to(m)
 
-if cmap:
+# -----------------------------------------------------------
+# LEGEND FIX: bottom-left + toggle + no-overlap
+# -----------------------------------------------------------
+show_legend = st.sidebar.checkbox("Show legend", True)
+
+if show_legend and cmap:
     cmap.add_to(m)
+
+    legend_css = """
+    <style>
+        .leaflet-control.branca {
+            position: absolute !important;
+            bottom: 20px !important;
+            left: 20px !important;
+            top: auto !important;
+            right: auto !important;
+            z-index: 9999 !important;
+            background-color: rgba(255,255,255,0.92) !important;
+            padding: 10px !important;
+            border-radius: 6px !important;
+            box-shadow: 0 0 8px rgba(0,0,0,0.2) !important;
+        }
+    </style>
+    """
+    st.markdown(legend_css, unsafe_allow_html=True)
 
 st_folium(m, height=600, width=1000)
 
 # -----------------------------------------------------------
-# STATS & CHARTS
+# STATISTICS
 # -----------------------------------------------------------
 st.subheader("Statistics & Charts")
 colA, colB = st.columns(2)
@@ -253,6 +282,7 @@ with colB:
     st.write("Describe")
     st.write(filtered.describe(include="all"))
 
+# Histogram
 if is_numeric:
     fig, ax = plt.subplots()
     filtered[chosen_x].plot.hist(ax=ax, bins=30)
@@ -273,22 +303,5 @@ st.download_button(
     file_name="filtered.geojson",
     mime="application/geo+json",
 )
-
-# -----------------------------------------------------------
-# BOTTOM-LEFT REQUIREMENTS
-# -----------------------------------------------------------
-st.sidebar.markdown("---")
-with st.sidebar.expander("📦 Requirements (click to expand)"):
-    st.code(
-        """streamlit
-geopandas
-folium
-streamlit-folium
-matplotlib
-mapclassify
-fiona
-branca""",
-        language="text"
-    )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
