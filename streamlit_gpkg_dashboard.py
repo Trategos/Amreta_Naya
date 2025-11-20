@@ -260,3 +260,4 @@ st.download_button(
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
 
+
