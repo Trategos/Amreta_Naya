@@ -1,37 +1,51 @@
 import streamlit as st
-import geopandas as gpd
-import pydeck as pdk
 import requests
 import tempfile
-import re
+import geopandas as gpd
+import pydeck as pdk
+import json
+import os
 
-st.set_page_config(page_title="GPKG Viewer", layout="wide")
-
-# ------------------------------------------------------------
-# Google Drive Downloader (WORKS FOR LARGE FILES 100MB+)
-# ------------------------------------------------------------
+# ----------------------------------------------------
+# GOOGLE DRIVE DOWNLOADER (robust + handles HTML pages)
+# ----------------------------------------------------
 def download_from_google_drive(file_id, destination):
     """
-    Downloads ANY file size from Google Drive using file ID.
-    Handles confirmation tokens (for large files).
+    Downloads a file from Google Drive, handling large-file confirmation
+    and blocking HTML pages. Ensures binary output before writing to disk.
     """
-    URL = "https://drive.google.com/uc?export=download"
     session = requests.Session()
 
-    response = session.get(URL, params={'id': file_id}, stream=True)
+    base_url = "https://drive.google.com/uc?export=download"
+    response = session.get(base_url, params={'id': file_id}, stream=True)
 
-    # Extract confirmation token
+    # If Drive returns HTML (login page / permissions issue)
+    if "text/html" in response.headers.get("Content-Type", ""):
+        raise Exception(
+            "Google Drive returned HTML instead of file. "
+            "Please ensure the file is shared as: Anyone with the link → Viewer."
+        )
+
+    # Look for confirmation token for large files
     token = None
     for key, value in response.cookies.items():
         if key.startswith("download_warning"):
             token = value
             break
 
+    # If token found, repeat request with confirmation
     if token:
-        params = {'id': file_id, 'confirm': token}
-        response = session.get(URL, params=params, stream=True)
+        response = session.get(
+            base_url, params={'id': file_id, 'confirm': token}, stream=True
+        )
 
-    # Write binary file
+    # Final HTML check (should never be HTML now)
+    if "text/html" in response.headers.get("Content-Type", ""):
+        raise Exception(
+            "Download blocked by Google Drive. File may not be shared publicly."
+        )
+
+    # Write binary GPKG to disk
     with open(destination, "wb") as f:
         for chunk in response.iter_content(32768):
             if chunk:
@@ -40,106 +54,85 @@ def download_from_google_drive(file_id, destination):
     return destination
 
 
-# ------------------------------------------------------------
-# Extract File ID from ANY Google Drive link
-# ------------------------------------------------------------
-def extract_drive_id(url):
-    """
-    Extracts Google Drive file ID from different URL formats.
-    """
-    patterns = [
-        r"https://drive\.google\.com/file/d/([a-zA-Z0-9_-]+)",  # main format
-        r"id=([a-zA-Z0-9_-]+)",  # uc?export=download&id=
-    ]
-
-    for p in patterns:
-        m = re.search(p, url)
-        if m:
-            return m.group(1)
-
-    return None
-
-
-# ------------------------------------------------------------
-# SIDEBAR UI
-# ------------------------------------------------------------
-st.sidebar.header("Google Drive Input")
-
-default_url = "https://drive.google.com/file/d/1mm8RVDsImtHyal5h8UuCz4hOVCigolf2/view?usp=drive_link"
-
-drive_url = st.sidebar.text_input("Google Drive File URL:", value=default_url)
-
-use_uploader = st.sidebar.checkbox("Use browser uploader? (Small files only)", value=False)
-
-st.title("🌍 GPKG Viewer — Google Drive Compatible")
-
-
-# ------------------------------------------------------------
-# File source selection
-# ------------------------------------------------------------
-gpkg_file = None
-
-# Option 1 — Upload
-if use_uploader:
-    uploaded_file = st.file_uploader("Upload .gpkg file", type=["gpkg"])
-    if uploaded_file:
-        temp = tempfile.NamedTemporaryFile(delete=False, suffix=".gpkg")
-        temp.write(uploaded_file.read())
-        gpkg_file = temp.name
-
-# Option 2 — Google Drive
-else:
-    file_id = extract_drive_id(drive_url)
-
-    if not file_id:
-        st.sidebar.error("❌ Could not detect Google Drive File ID from the URL.")
-    else:
-        st.sidebar.success(f"📄 File ID detected: {file_id}")
-        if st.sidebar.button("Download from Google Drive"):
-            with st.spinner("Downloading .gpkg from Google Drive..."):
-                temp = tempfile.NamedTemporaryFile(delete=False, suffix=".gpkg")
-                gpkg_path = download_from_google_drive(file_id, temp.name)
-                gpkg_file = gpkg_path
-            st.success("Download completed!")
-
-
-# ------------------------------------------------------------
-# Read and Display GPKG Map
-# ------------------------------------------------------------
-if gpkg_file:
-    st.info(f"Reading file from: **{gpkg_file}**")
+# ----------------------------------------------------
+# LOADING GEO PACKAGE
+# ----------------------------------------------------
+def load_gpkg(path, layer=None):
+    """Load a GPKG and auto-convert to EPSG:4326."""
+    gdf = gpd.read_file(path, layer=layer)
 
     try:
-        gdf = gpd.read_file(gpkg_file)
+        gdf = gdf.to_crs(4326)
+    except:
+        pass
 
-        st.success("File loaded successfully!")
+    return gdf
 
-        st.subheader("📋 Data Preview")
+
+# ----------------------------------------------------
+# STREAMLIT UI
+# ----------------------------------------------------
+st.set_page_config(page_title="GPKG Dashboard", layout="wide")
+st.title("Google Drive → Streamlit GPKG Viewer")
+
+st.markdown("""
+Upload a `.gpkg` file stored in Google Drive and display it on an interactive dashboard.
+""")
+
+# DEFAULT YOUR FILE ID
+default_id = "1mm8RVDsImtHyal5h8UuCz4hOVCigolf2"
+
+file_id = st.text_input("Google Drive File ID", value=default_id)
+
+if st.button("Load GPKG"):
+    try:
+        with st.spinner("Downloading from Google Drive..."):
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".gpkg")
+            download_from_google_drive(file_id, tmp.name)
+            gpkg_path = tmp.name
+
+        st.success("Download successful!")
+
+        # List layers
+        import fiona
+        layers = fiona.listlayers(gpkg_path)
+        layer = st.selectbox("Choose GPKG Layer", layers)
+
+        with st.spinner("Reading GeoPackage..."):
+            gdf = load_gpkg(gpkg_path, layer=layer)
+
+        st.success(f"Loaded {len(gdf)} features from layer '{layer}'")
         st.write(gdf.head())
 
-        # Convert to JSON for PyDeck
-        gdf_json = gdf.to_json()
+        # Convert to GeoJSON for map
+        geojson = json.loads(gdf.to_json())
 
-        st.subheader("🗺️ Map Viewer")
-
+        # Compute map center
         centroid = gdf.geometry.centroid
-        view_state = pdk.ViewState(
-            latitude=centroid.y.mean(),
-            longitude=centroid.x.mean(),
-            zoom=12,
-            pitch=45,
-        )
+        center_lat = float(centroid.y.mean())
+        center_lon = float(centroid.x.mean())
+
+        # Display map
+        st.subheader("Map View")
 
         layer = pdk.Layer(
             "GeoJsonLayer",
-            gdf_json,
+            data=geojson,
             pickable=True,
-            stroked=True,
+            stroked=False,
             filled=True,
-            lineWidthMinPixels=1,
+            get_fill_color="[200, 30, 0, 160]",
+            auto_highlight=True,
         )
 
-        st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=view_state))
+        view_state = pdk.ViewState(
+            latitude=center_lat, longitude=center_lon, zoom=10
+        )
+
+        deck = pdk.Deck(layers=[layer], initial_view_state=view_state)
+        st.pydeck_chart(deck)
 
     except Exception as e:
-        st.error(f"❌ Error reading GPKG: {e}")
+        st.error(f"❌ Error: {e}")
+
+st.caption("Built with Streamlit + GeoPandas + Google Drive API workaround.")
