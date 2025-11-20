@@ -1,9 +1,11 @@
 streamlit
 geopandas
 fiona
+folium
+streamlit-folium
+pandas
+matplotlib
+mapclassify
 shapely
 pyproj
 rtree
-leafmap
-requests
-pandas
