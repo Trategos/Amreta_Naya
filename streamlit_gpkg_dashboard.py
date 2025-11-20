@@ -49,10 +49,18 @@ def safe_to_crs(gdf, crs="EPSG:4326"):
     except Exception:
         return gdf
 
-def add_vertical_colormap_to_map(map_obj, cmap, title, top_px=80, left_px=20):
+def add_vertical_colormap_to_map(
+    map_obj,
+    cmap,
+    title,
+    top_px=80,
+    left_px=20,
+    height_px=300,
+    width_px=48
+):
     import json
 
-    # --- Extract gradient colors ---
+    # Extract gradient colors
     steps = 40
     colors = [cmap(x/steps) for x in range(steps + 1)]
     css_gradient = ", ".join(colors)
@@ -60,7 +68,6 @@ def add_vertical_colormap_to_map(map_obj, cmap, title, top_px=80, left_px=20):
     vmin = round(cmap.vmin, 4)
     vmax = round(cmap.vmax, 4)
 
-    # --- Main Legend HTML + CSS ---
     legend_html = f"""
     <style>
     .draggable-legend {{
@@ -68,7 +75,7 @@ def add_vertical_colormap_to_map(map_obj, cmap, title, top_px=80, left_px=20):
         top: {top_px}px;
         left: {left_px}px;
         z-index: 999999;
-        width: 70px;
+        width: {width_px + 46}px;
         background: white;
         padding: 10px 8px;
         border-radius: 10px;
@@ -81,8 +88,8 @@ def add_vertical_colormap_to_map(map_obj, cmap, title, top_px=80, left_px=20):
     }}
 
     .gradient-box {{
-        height: 200px;
-        width: 24px;
+        height: {height_px}px;
+        width: {width_px}px;
         margin: 6px auto;
         background: linear-gradient(to bottom, {css_gradient});
         border-radius: 4px;
@@ -109,7 +116,6 @@ def add_vertical_colormap_to_map(map_obj, cmap, title, top_px=80, left_px=20):
     </div>
 
     <script>
-    // Make legend draggable
     const legend = document.getElementById("legend");
     let offsetX, offsetY, isDown = false;
 
@@ -125,16 +131,15 @@ def add_vertical_colormap_to_map(map_obj, cmap, title, top_px=80, left_px=20):
 
     document.addEventListener("mousemove", function(e) {{
         if (isDown) {{
-            const newX = e.clientX + offsetX;
-            const newY = e.clientY + offsetY;
-            legend.style.left = newX + "px";
-            legend.style.top = newY + "px";
+            legend.style.left = (e.clientX + offsetX) + "px";
+            legend.style.top = (e.clientY + offsetY) + "px";
         }}
     }});
     </script>
     """
 
     map_obj.get_root().html.add_child(folium.Element(legend_html))
+
 
 # -----------------------------------------------------------
 # SIDEBAR – DATA SOURCE
@@ -399,4 +404,5 @@ except Exception as e:
     st.error(f"Failed to prepare download: {e}")
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
 
