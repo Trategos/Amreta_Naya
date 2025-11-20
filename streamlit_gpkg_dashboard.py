@@ -16,6 +16,7 @@ import mapclassify
 from branca import colormap as cm
 import streamlit.components.v1 as components
 import os
+import requests
 
 # -----------------------------------------------------------
 # CONFIG
@@ -24,33 +25,31 @@ st.set_page_config(layout="wide", page_title="GPKG Explorer")
 
 # Manually list the GPKG files you want to offer
 GPKG_OPTIONS = {
-    "2029 – 8% No Measures": (
+    "2029 – 8% No Measures":
         "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
-        "Impacts_aggregated_Current_2029_8percent_no_measures_DESA.gpkg"
-    ),
-    "2029 – 5% No Measures": (
+        "Impacts_aggregated_Current_2029_8percent_no_measures_DESA.gpkg",
+
+    "2029 – 5% No Measures":
         "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
-        "Impacts_aggregated_Current_2029_5percent_no_measures_DESA.gpkg"
-    ),
-    "2029 – 8% NbS": (
+        "Impacts_aggregated_Current_2029_5percent_no_measures_DESA.gpkg",
+
+    "2029 – 8% NbS":
         "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
-        "Impacts_aggregated_Current_2029_8percent_NBS_easternrivers_DESA.gpkg"
-    ),
-    "2029 – 5% NbS": (
+        "Impacts_aggregated_Current_2029_8percent_NBS_easternrivers_DESA.gpkg",
+
+    "2029 – 5% NbS":
         "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
-        "Impacts_aggregated_Current_2029_5percent_NBS_easternrivers_DESA.gpkg"
-    ),
-    "2029 – 8% Grey+Green": (
+        "Impacts_aggregated_Current_2029_5percent_NBS_easternrivers_DESA.gpkg",
+
+    "2029 – 8% Grey+Green":
         "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
-        "Impacts_aggregated_Current_2029_8percent_Strategi_BBWS_All_DESA.gpkg"
-    ),
-    "2029 – 5% Grey+Green": (
+        "Impacts_aggregated_Current_2029_8percent_Strategi_BBWS_All_DESA.gpkg",
+
+    "2029 – 5% Grey+Green":
         "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
         "Impacts_aggregated_Current_2029_5percent_Strategi_BBWS_All_DESA.gpkg"
-    ),
 }
 
-# Default option must exist in GPKG_OPTIONS
 DEFAULT_LABEL = "2029 – 8% No Measures"
 
 # -----------------------------------------------------------
@@ -78,42 +77,31 @@ def safe_to_crs(gdf, crs="EPSG:4326"):
     except Exception:
         return gdf
 
-def extract_scenario_name(gpkg_filename: str):
+def extract_scenario_name(gpkg_url: str):
     """
-    Extract scenario from GPKG name.
+    Convert GPKG filename into scenario name.
     Example:
-    Impacts_aggregated_Current_2029_5percent_NBS_easternrivers_DESA.gpkg
-    → Current_2029_5percent_NBS_easternrivers
+        Impacts_aggregated_Current_2029_5percent_NBS_easternrivers_DESA.gpkg
+    →   Current_2029_5percent_NBS_easternrivers
     """
-    name = os.path.basename(gpkg_filename)
-    name = name.replace("Impacts_aggregated_", "").replace("_DESA.gpkg", "")
-    return name
+    fn = os.path.basename(gpkg_url)
+    fn = fn.replace("Impacts_aggregated_", "").replace("_DESA.gpkg", "")
+    return fn
 
 # -----------------------------------------------------------
 # SIDEBAR – DATA SOURCE
 # -----------------------------------------------------------
 st.sidebar.title("Data Source")
 
-load_mode = st.sidebar.radio(
-    "Load GPKG from",
-    ["Choose from list", "Custom URL"]
-)
+mode = st.sidebar.radio("Load GPKG from", ["Choose from list", "Custom URL"])
 
-if load_mode == "Choose from list":
-
+if mode == "Choose from list":
     labels = list(GPKG_OPTIONS.keys())
     default_index = labels.index(DEFAULT_LABEL) if DEFAULT_LABEL in labels else 0
-
-    chosen_label = st.sidebar.selectbox(
-        "Select dataset",
-        labels,
-        index=default_index
-    )
-
-    gpkg_path = GPKG_OPTIONS[chosen_label]
-
+    selected_label = st.sidebar.selectbox("Select dataset", labels, index=default_index)
+    gpkg_path = GPKG_OPTIONS[selected_label]
 else:
-    gpkg_path = st.sidebar.text_input("Enter remote GPKG URL", "https://.../file.gpkg")
+    gpkg_path = st.sidebar.text_input("Enter remote GPKG URL", "")
 
 if not gpkg_path:
     st.stop()
@@ -127,11 +115,11 @@ st.sidebar.write("### Layer selection")
 with st.spinner("Listing layers..."):
     layers = list_layers(gpkg_path)
 
-if not layers:
+if layers:
+    chosen_layer = st.sidebar.selectbox("Choose layer", layers)
+else:
     st.sidebar.warning("No layers found.")
     chosen_layer = None
-else:
-    chosen_layer = st.sidebar.selectbox("Choose layer", layers)
 
 # -----------------------------------------------------------
 # LOAD SELECTED LAYER
@@ -147,17 +135,41 @@ if gdf is None:
 gdf = safe_to_crs(gdf)
 
 # -----------------------------------------------------------
-# SHOW MATCHING METRICS HTML
+# LOAD METRICS HTML (LOCAL FIRST, HF FALLBACK)
 # -----------------------------------------------------------
-scenario_name = extract_scenario_name(gpkg_path)
-metrics_filename = f"{scenario_name}_metrics.html"
-local_html_path = f"/mnt/data/{metrics_filename}"
+scenario = extract_scenario_name(gpkg_path)
+metrics_filename = f"{scenario}_metrics.html"
+
+local_path = f"/mnt/data/{metrics_filename}"
+hf_url = (
+    "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
+    + metrics_filename
+)
 
 st.markdown("## Scenario Metrics")
 
-if os.path.exists(local_html_path):
-    with open(local_html_path, "r", encoding="utf-8") as f:
+html_content = None
+
+# 1️⃣ Try local file
+if os.path.exists(local_path):
+    with open(local_path, "r", encoding="utf-8") as f:
         html_content = f.read()
+    st.success(f"Loaded local metrics file: {metrics_filename}")
+
+# 2️⃣ Try HuggingFace fallback
+else:
+    try:
+        r = requests.get(hf_url)
+        if r.status_code == 200:
+            html_content = r.text
+            st.info(f"Loaded metrics file from HuggingFace: {metrics_filename}")
+        else:
+            st.warning(f"Metrics file not found on HuggingFace: {metrics_filename}")
+    except:
+        st.warning(f"Could not fetch metrics HTML for: {metrics_filename}")
+
+# 3️⃣ Show HTML (if available)
+if html_content:
     components.html(html_content, height=450, scrolling=True)
 else:
     st.info(f"No metrics file found for: {metrics_filename}")
@@ -178,8 +190,8 @@ with col2:
     st.metric("Columns", len(gdf.columns))
     geom_types = gdf.geometry.geom_type.value_counts().to_dict()
     st.write("Geometry types:")
-    for gt, ct in geom_types.items():
-        st.write(f"- {gt}: {ct}")
+    for g, c in geom_types.items():
+        st.write(f"- {g}: {c}")
 
 with col3:
     if st.button("Show attribute table (first 200 rows)"):
@@ -196,14 +208,11 @@ columns = list(gdf.columns)
 columns_no_geom = [c for c in columns if c != gdf.geometry.name]
 
 chosen_x = st.sidebar.selectbox("Column for choropleth & analysis", columns_no_geom)
-
 is_numeric = pd.api.types.is_numeric_dtype(gdf[chosen_x])
 
 filtered = gdf.copy()
-
 st.sidebar.write("### Filters")
 
-# Numeric filtering
 if is_numeric:
     minv = float(gdf[chosen_x].min())
     maxv = float(gdf[chosen_x].max())
@@ -223,7 +232,7 @@ st.subheader("Interactive Map")
 try:
     c = filtered.geometry.unary_union.centroid
     center = [c.y, c.x]
-except Exception:
+except:
     center = [0, 0]
 
 map_tiles = st.sidebar.selectbox(
@@ -233,9 +242,6 @@ map_tiles = st.sidebar.selectbox(
 
 m = folium.Map(location=center, zoom_start=8, tiles=map_tiles)
 
-# -----------------------------------------------------------
-# CHOROPLETH
-# -----------------------------------------------------------
 cmap = None
 
 if is_numeric and len(filtered) > 0:
@@ -243,18 +249,15 @@ if is_numeric and len(filtered) > 0:
 
     method = st.sidebar.selectbox(
         "Classification method",
-        ["natural_breaks (Jenks)", "quantiles", "equal_interval"],
-        index=0
+        ["natural_breaks (Jenks)", "quantiles", "equal_interval"], index=0
     )
 
     bins = st.sidebar.slider("Number of classes", 3, 9, 5)
 
     palette_name = st.sidebar.selectbox(
         "Color palette",
-        [
-            "Blues_09", "Reds_09", "YlOrRd_09",
-            "Viridis_09", "PuBu_09", "YlGn_09", "GnBu_09"
-        ],
+        ["Blues_09", "Reds_09", "YlOrRd_09", "Viridis_09",
+         "PuBu_09", "YlGn_09", "GnBu_09"],
         index=0
     )
 
@@ -269,29 +272,19 @@ if is_numeric and len(filtered) > 0:
             classifier = mapclassify.EqualInterval(values, k=bins)
 
         filtered["_class"] = classifier.yb
+        cmap = getattr(cm.linear, palette_name).scale(values.min(), values.max())
 
-        vmin, vmax = values.min(), values.max()
-        cmap = getattr(cm.linear, palette_name).scale(vmin, vmax)
-
-    except Exception as e:
-        st.warning(f"Classification failed: {e}")
+    except:
         filtered["_class"] = -1
         cmap = cm.LinearColormap(["#cccccc", "#cccccc"])
 
 def style_function(feature):
-    value = feature["properties"].get(chosen_x)
-    if cmap is None or value is None:
+    v = feature["properties"].get(chosen_x)
+    if cmap is None or v is None:
         return {"fillOpacity": 0.3, "color": "black", "weight": 0.3}
-    return {
-        "fillColor": cmap(value),
-        "color": "black",
-        "weight": 0.25,
-        "fillOpacity": 0.85,
-    }
+    return {"fillColor": cmap(v), "color": "black", "weight": 0.25, "fillOpacity": 0.85}
 
-popup_fields = st.multiselect(
-    "Popup fields", columns_no_geom, default=columns_no_geom[:5]
-)
+popup_fields = st.multiselect("Popup fields", columns_no_geom, default=columns_no_geom[:5])
 
 folium.GeoJson(
     filtered.to_json(),
@@ -312,11 +305,9 @@ st.subheader("Statistics & Charts")
 colA, colB = st.columns(2)
 
 with colA:
-    st.write("Preview (top 10)")
     st.dataframe(filtered.head(10))
 
 with colB:
-    st.write("Describe")
     st.write(filtered.describe(include="all"))
 
 if is_numeric:
@@ -335,11 +326,9 @@ buffer.seek(0)
 
 st.download_button(
     "Download filtered.geojson",
-    data=buffer,
-    file_name="filtered.geojson",
-    mime="application/geo+json",
+    buffer,
+    "filtered.geojson",
+    "application/geo+json",
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
-
-
