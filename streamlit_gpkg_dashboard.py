@@ -1,13 +1,14 @@
 """
 Streamlit interactive dashboard for a GeoPackage (.gpkg)
-Rewritten: includes a stable vertical continuous colorbar legend (always visible).
+Updated: Removed text search, fixed interactive color scaling,
+added natural breaks & color palettes.
 """
 
-import io
 import streamlit as st
 import geopandas as gpd
 import pandas as pd
 import fiona
+import io
 from streamlit_folium import st_folium
 import folium
 import matplotlib.pyplot as plt
@@ -25,7 +26,7 @@ DEFAULT_REMOTE_URL = (
 )
 
 # -----------------------------------------------------------
-# UTIL FUNCTIONS
+# FUNCTIONS
 # -----------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def list_layers(path_or_url: str):
@@ -49,55 +50,6 @@ def safe_to_crs(gdf, crs="EPSG:4326"):
     except Exception:
         return gdf
 
-def add_vertical_colormap_to_map(map_obj, cmap, title="Legend", top_px=80, left_px=20):
-    import branca
-    import folium
-
-    # Build CSS gradient from colormap
-    n = 256
-    gradient_colors = [
-        f"rgb({int(r*255)}, {int(g*255)}, {int(b*255)})"
-        for r, g, b, a in (cmap(i/n) for i in range(n))
-    ]
-    css_gradient = ",".join(gradient_colors)
-
-    legend_html = f"""
-    <div id="legend" style="
-        position: fixed;
-        z-index: 9999;
-        top: {top_px}px;
-        left: {left_px}px;
-        width: 60px;
-        padding: 10px 6px;
-        background: rgba(255,255,255,0.95);
-        border-radius: 14px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-        font-size: 12px;
-    ">
-        <div style="font-weight:600; text-align:center; margin-bottom:6px;">
-            {title}
-        </div>
-
-        <div style="
-            width: 22px;
-            height: 260px;
-            margin: 0 auto;
-            border-radius: 6px;
-            border: 1px solid #999;
-            background: linear-gradient(to bottom, {css_gradient});
-        ">
-        </div>
-
-        <div style="text-align:center; margin-top:6px; font-size:11px;">
-            Max
-        </div>
-        <div style="text-align:center; margin-top:2px; font-size:11px;">
-            Min
-        </div>
-    </div>
-    """
-
-    map_obj.get_root().html.add_child(folium.Element(legend_html))
 
 # -----------------------------------------------------------
 # SIDEBAR – DATA SOURCE
@@ -154,10 +106,7 @@ with col1:
 
 with col2:
     st.metric("Columns", len(gdf.columns))
-    try:
-        geom_types = gdf.geometry.geom_type.value_counts().to_dict()
-    except Exception:
-        geom_types = {"unknown": len(gdf)}
+    geom_types = gdf.geometry.geom_type.value_counts().to_dict()
     st.write("Geometry types:")
     for gt, ct in geom_types.items():
         st.write(f"- {gt}: {ct}")
@@ -186,11 +135,8 @@ st.sidebar.write("### Filters")
 
 # Numeric filtering
 if is_numeric:
-    try:
-        minv = float(gdf[chosen_x].min())
-        maxv = float(gdf[chosen_x].max())
-    except Exception:
-        minv, maxv = 0.0, 1.0
+    minv = float(gdf[chosen_x].min())
+    maxv = float(gdf[chosen_x].max())
     rmin, rmax = st.sidebar.slider(f"Filter {chosen_x}", minv, maxv, (minv, maxv))
     filtered = filtered[(filtered[chosen_x] >= rmin) & (filtered[chosen_x] <= rmax)]
 else:
@@ -222,7 +168,6 @@ m = folium.Map(location=center, zoom_start=8, tiles=map_tiles)
 # CHOROPLETH: Natural breaks and color ramps
 # -----------------------------------------------------------
 cmap = None
-classifier = None
 
 if is_numeric and len(filtered) > 0:
 
@@ -245,8 +190,7 @@ if is_numeric and len(filtered) > 0:
         index=0
     )
 
-    # Ensure numeric values (float) and ignore NaNs in classification
-    values = pd.to_numeric(filtered[chosen_x], errors="coerce").dropna().astype(float)
+    values = filtered[chosen_x].astype(float)
 
     try:
         # Classification
@@ -257,48 +201,31 @@ if is_numeric and len(filtered) > 0:
         else:
             classifier = mapclassify.EqualInterval(values, k=bins)
 
-        # Attach class index to the filtered dataframe (for potential discrete legend)
-        # We'll keep the style coloring via continuous colormap (so the map looks smooth)
-        filtered["_class"] = pd.to_numeric(filtered[chosen_x], errors="coerce").map(
-            lambda v: int(classifier.find_bin(v)) if pd.notna(v) else -1
-        )
+        filtered["_class"] = classifier.yb
 
-        # Continuous colormap (branca)
-        vmin, vmax = float(values.min()), float(values.max())
+        # Colormap
+        vmin, vmax = values.min(), values.max()
         cmap = getattr(cm.linear, palette_name).scale(vmin, vmax)
-        cmap.caption = chosen_x
 
     except Exception as e:
         st.warning(f"Classification failed: {e}")
         filtered["_class"] = -1
         cmap = cm.LinearColormap(["#cccccc", "#cccccc"])
-        cmap.caption = chosen_x
 
-# Style function: use chosen_x property's numeric value to get color from cmap
+# Style function
 def style_function(feature):
-    props = feature.get("properties", {})
-    raw_val = props.get(chosen_x)
-    try:
-        val = float(raw_val) if raw_val is not None else None
-    except Exception:
-        val = None
-
-    if val is None or cmap is None:
+    value = feature["properties"].get(chosen_x)
+    if cmap is None or value is None:
         return {"fillOpacity": 0.3, "color": "black", "weight": 0.3}
 
-    try:
-        fill_color = cmap(val)
-    except Exception:
-        fill_color = "#999999"
-
     return {
-        "fillColor": fill_color,
+        "fillColor": cmap(value),
         "color": "black",
         "weight": 0.25,
         "fillOpacity": 0.85,
     }
 
-# Add GeoJSON layer
+# Add GeoJSON
 popup_fields = st.multiselect(
     "Popup fields", columns_no_geom, default=columns_no_geom[:5]
 )
@@ -308,16 +235,12 @@ folium.GeoJson(
     style_function=style_function,
     tooltip=folium.GeoJsonTooltip(fields=popup_fields),
     popup=folium.GeoJsonPopup(fields=popup_fields, labels=True),
-    name=str(chosen_layer),
 ).add_to(m)
 
-add_vertical_colormap_to_map(m, cmap, title=chosen_x)
+if cmap:
+    cmap.add_to(m)
 
-# Add layer control
-folium.LayerControl().add_to(m)
-
-# Render map
-st_data = st_folium(m, height=600, width=1000)
+st_folium(m, height=600, width=1000)
 
 # -----------------------------------------------------------
 # STATS & CHARTS
@@ -336,8 +259,7 @@ with colB:
 # Histogram
 if is_numeric:
     fig, ax = plt.subplots()
-    # dropna to avoid plotting errors
-    filtered[chosen_x].dropna().astype(float).plot.hist(ax=ax, bins=30)
+    filtered[chosen_x].plot.hist(ax=ax, bins=30)
     ax.set_title(f"Histogram of {chosen_x}")
     st.pyplot(fig)
 
@@ -346,20 +268,14 @@ if is_numeric:
 # -----------------------------------------------------------
 st.subheader("Download filtered data")
 buffer = io.BytesIO()
-# Save as GeoJSON to buffer
-try:
-    filtered.to_file(buffer, driver="GeoJSON")
-    buffer.seek(0)
-    st.download_button(
-        "Download filtered.geojson",
-        data=buffer,
-        file_name="filtered.geojson",
-        mime="application/geo+json",
-    )
-except Exception as e:
-    st.error(f"Failed to prepare download: {e}")
+filtered.to_file(buffer, driver="GeoJSON")
+buffer.seek(0)
+
+st.download_button(
+    "Download filtered.geojson",
+    data=buffer,
+    file_name="filtered.geojson",
+    mime="application/geo+json",
+)
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
-
-
-
