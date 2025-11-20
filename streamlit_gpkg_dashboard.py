@@ -170,7 +170,7 @@ else:
 
 # 3️⃣ Show HTML (if available)
 if html_content:
-    components.html(html_content, height=450, scrolling=True)
+    components.html(html_content, width= 600, height=600, scrolling=True)
 else:
     st.info(f"No metrics file found for: {metrics_filename}")
 
@@ -332,3 +332,4 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
