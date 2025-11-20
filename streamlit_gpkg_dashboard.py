@@ -317,6 +317,69 @@ st.download_button(
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
 
+# -----------------------------------------------------------
+# USER CAPEX INPUT + BCR CALCULATION
+# -----------------------------------------------------------
+st.markdown("## Benefit–Cost Ratio (BCR) Calculator")
+
+# Load BCR.csv from HuggingFace
+BCR_URL = "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/BCR.csv"
+
+try:
+    bcr_df = pd.read_csv(BCR_URL, sep=";")
+except Exception as e:
+    st.error(f"Failed to load BCR.csv from HuggingFace: {e}")
+    st.stop()
+
+# Extract scenario key (for matching in CSV)
+scenario_key = extract_scenario_name(gpkg_path)
+
+# Find matching row
+matched = bcr_df[bcr_df["Skenario"].str.contains(scenario_key, case=False, na=False)]
+
+if matched.empty:
+    st.warning(f"No benefit record found in BCR.csv for: **{scenario_key}**")
+else:
+    row = matched.iloc[0]
+
+    # Parse Indonesian currency formats
+    def parse_rupiah(x):
+        if isinstance(x, str):
+            x = x.replace("Rp", "").replace(".", "").replace(",", "").strip()
+        try:
+            return float(x)
+        except:
+            return None
+
+    # Benefit from CSV
+    benefit_value = parse_rupiah(row["Benefit"])
+
+    # Baseline cost from CSV (optional)
+    cost_value = parse_rupiah(row.get("Cost", None))
+
+    st.write(f"**Benefit (from dataset):** Rp {benefit_value:,.0f}")
+
+    if cost_value:
+        baseline_bcr = benefit_value / cost_value
+        st.write(f"**Baseline CAPEX (from dataset):** Rp {cost_value:,.0f}")
+        st.metric("Baseline BCR", f"{baseline_bcr:.3f}")
+
+    # CAPEX input from user
+    user_cost = st.text_input("Enter your estimated CAPEX (Rp)",
+                              placeholder="e.g. 1500000000000")
+
+    if user_cost:
+        user_cost_num = parse_rupiah(user_cost)
+
+        if user_cost_num is None:
+            st.error("Invalid CAPEX format. Please enter a proper number.")
+        else:
+            new_bcr = benefit_value / user_cost_num
+
+            st.subheader("Updated BCR using your CAPEX")
+            st.write(f"**Your CAPEX:** Rp {user_cost_num:,.0f}")
+            st.metric("New BCR", f"{new_bcr:.3f}")
+
 
 
 
