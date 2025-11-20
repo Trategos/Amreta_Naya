@@ -111,7 +111,8 @@ st.markdown(
 # --- Sidebar controls ---
 # GitHub raw URL input
 st.sidebar.header("Online Sources")
-sharepoint_url = st.sidebar.text_input("https://puprtes-my.sharepoint.com/:u:/r/personal/.../Impacts_building_footprints...gpkg?csf=1&web=1&e=p7nc6c)")
+sharepoint_url = st.sidebar.text_input("https://puprtes-my.sharepoint.com/:u:/r/personal/.../Impacts_building_footprints.gpkg?download=1
+")
 st.sidebar.header("GitHub Source")
 github_url = st.sidebar.text_input("Raw GitHub URL to .gpkg (optional)")
 
@@ -270,3 +271,4 @@ else:
 
 # Footer notes
 st.caption("Built with Streamlit + GeoPandas + pydeck. For very large datasets, consider serving vector tiles (PostGIS + tileserver) for best web performance.")
+
