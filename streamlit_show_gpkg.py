@@ -1,97 +1,90 @@
 import streamlit as st
 import geopandas as gpd
-import folium
-from folium.plugins import Fullscreen
-from streamlit_folium import st_folium
 import tempfile
 import requests
-from pathlib import Path
+import leafmap.foliumap as leafmap
 
 st.set_page_config(page_title="GPKG Viewer", layout="wide")
 
-st.title("📦 GPKG Viewer from GitHub LFS")
+st.title("🌍 GPKG Web Viewer (HuggingFace Dataset)")
+st.markdown("Loads and displays a `.gpkg` directly from HuggingFace.")
 
-# -----------------------------------------------------------
-# Function to download file from GitHub LFS (direct media link)
-# -----------------------------------------------------------
-def download_from_github_lfs(url):
-    try:
-        st.info("Downloading file from GitHub LFS…")
-        r = requests.get(url, allow_redirects=True, stream=True)
+# ---------------------------------------------------------
+# 1. File URL (HuggingFace)
+# ---------------------------------------------------------
+FILE_URL = "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/Impacts_building_footprints_Current_2029_8percent_no_measures.gpkg"
 
-        if r.status_code != 200:
-            st.error(f"Failed to download file. HTTP Status: {r.status_code}")
-            return None
+st.info(f"Using dataset from HuggingFace:\n{FILE_URL}")
 
-        # Save to temporary file
-        tmp_path = Path(tempfile.gettempdir()) / "dataset.gpkg"
-        with open(tmp_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
+# ---------------------------------------------------------
+# 2. Download GPKG
+# ---------------------------------------------------------
+st.subheader("Step 1 — Downloading GPKG…")
 
-        st.success(f"GPKG downloaded: {tmp_path}")
-        return str(tmp_path)
+try:
+    r = requests.get(FILE_URL, stream=True)
+    r.raise_for_status()
 
-    except Exception as e:
-        st.error(f"❌ Error downloading file: {e}")
-        return None
+    # Detect HTML (means the URL is wrong)
+    if r.headers.get("Content-Type", "").startswith("text/html"):
+        st.error("❌ ERROR: HuggingFace returned HTML, not the GPKG file.")
+        st.stop()
 
+    # Save to temp file
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".gpkg")
+    for chunk in r.iter_content(chunk_size=8192):
+        if chunk:
+            tmp.write(chunk)
+    tmp.flush()
 
-# -----------------------------------------------------------
-# GitHub LFS Link Input
-# -----------------------------------------------------------
-default_url = (
-    "https://media.githubusercontent.com/media/Trategos/Amreta_Naya/main/"
-    "Impacts_building_footprints_Current_2029_8percent_no_measures.gpkg"
-)
+    gpkg_path = tmp.name
+    st.success(f"GPKG downloaded to: {gpkg_path}")
 
-url = st.text_input("GitHub LFS GPKG URL:", value=default_url)
+except Exception as e:
+    st.error(f"❌ Failed to download: {e}")
+    st.stop()
 
-if st.button("Load GPKG"):
-    gpkg_path = download_from_github_lfs(url)
+# ---------------------------------------------------------
+# 3. Read available layers
+# ---------------------------------------------------------
+st.subheader("Step 2 — Reading Layers…")
 
-    if gpkg_path:
-        try:
-            st.info("Reading GPKG layers…")
+try:
+    layers = gpd.io.file.fiona.listlayers(gpkg_path)
+    st.write("Found layers:", layers)
+except Exception as e:
+    st.error(f"❌ Failed to list layers: {e}")
+    st.stop()
 
-            # List layers safely
-            layers = gpd.io.file.fiona.listlayers(gpkg_path)
+# ---------------------------------------------------------
+# 4. Select layer
+# ---------------------------------------------------------
+selected = st.selectbox("Choose a layer to display:", layers)
 
-            if not layers:
-                st.error("No layers found inside the GPKG.")
-                st.stop()
+# ---------------------------------------------------------
+# 5. Load selected layer
+# ---------------------------------------------------------
+st.subheader("Step 3 — Loading Layer…")
 
-            selected_layer = st.selectbox("Select layer:", layers)
+try:
+    gdf = gpd.read_file(gpkg_path, layer=selected)
+    st.success(f"Loaded {len(gdf):,} features.")
+    st.write(gdf.head())
+except Exception as e:
+    st.error(f"❌ Error loading layer: {e}")
+    st.stop()
 
-            gdf = gpd.read_file(gpkg_path, layer=selected_layer)
-            st.success(f"Loaded layer: {selected_layer}")
+# ---------------------------------------------------------
+# 6. Display on map
+# ---------------------------------------------------------
+st.subheader("Step 4 — Interactive Map")
 
-            # Show DataFrame preview
-            st.subheader("📊 Data Preview")
-            st.dataframe(gdf.head())
+try:
+    m = leafmap.Map(center=[-2, 118], zoom=5)
 
-            # -----------------------------------------------------------
-            # MAP VIEWER
-            # -----------------------------------------------------------
-            st.subheader("🗺️ Map Viewer")
+    m.add_gdf(gdf, layer_name=selected)
 
-            # Reproject to WGS84 for web mapping
-            if gdf.crs is not None and gdf.crs.to_epsg() != 4326:
-                gdf = gdf.to_crs(4326)
+    m.to_streamlit(height=700)
 
-            # Create map
-            centroid = gdf.geometry.iloc[0].centroid
-            m = folium.Map(location=[centroid.y, centroid.x], zoom_start=12)
-            Fullscreen().add_to(m)
-
-            folium.GeoJson(
-                gdf,
-                name="GPKG Layer",
-                tooltip=folium.GeoJsonTooltip(fields=gdf.columns[:5].tolist())
-            ).add_to(m)
-
-            st_folium(m, height=600, width=1200)
-
-        except Exception as e:
-            st.error(f"❌ Failed to read GPKG: {e}")
+except Exception as e:
+    st.error(f"❌ Failed to render map: {e}")
