@@ -169,8 +169,15 @@ else:
         st.warning(f"Could not fetch metrics HTML for: {metrics_filename}")
 
 # 3️⃣ Show HTML (if available)
+
 if html_content:
-    components.html(html_content, width= 1500, height=600, scrolling=True)
+    # Add left padding to avoid cropping
+    padded_html = f"""
+    <div style="padding-left: 40px; width:100%;">
+    {html_content}
+    </div>
+    """
+    components.html(padded_html, width= 1500, height=600, scrolling=False)
 else:
     st.info(f"No metrics file found for: {metrics_filename}")
 
@@ -332,5 +339,6 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
 
 
