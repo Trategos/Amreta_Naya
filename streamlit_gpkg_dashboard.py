@@ -45,7 +45,7 @@ st.set_page_config(layout="wide", page_title="GPKG Explorer")
 
 DEFAULT_REMOTE_URL = (
     "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
-    "Impacts_building_footprints_Current_2029_8percent_no_measures.gpkg"
+    "Impacts_aggregated_Current_2029_8percent_no_measures_DESA.gpkg"
 )
 
 # -----------------------------------------------------------
@@ -259,5 +259,6 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
 
 
