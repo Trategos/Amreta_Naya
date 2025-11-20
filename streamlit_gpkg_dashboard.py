@@ -46,19 +46,48 @@ GPKG_OPTIONS = {
         "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
         "Impacts_aggregated_Current_2029_5percent_Strategi_BBWS_All_DESA.gpkg"
     ),
-    # Add more manually:
-    # "Label": "url_to_file.gpkg",
 }
 
-# Optional: default selection
-DEFAULT_LABEL = "Digital Twin Flood Adaptation Planning"
+# Optional: default selection (must match a key or will fallback safely)
+DEFAULT_LABEL = "2029 – 8% No Measures"
+
+# -----------------------------------------------------------
+# FUNCTIONS
+# -----------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def list_layers(path_or_url: str):
+    try:
+        return fiona.listlayers(path_or_url)
+    except Exception as e:
+        st.warning(f"Could not list layers: {e}")
+        return []
+
+@st.cache_data(show_spinner=True)
+def load_layer(path_or_url: str, layer_name: str = None):
+    try:
+        return gpd.read_file(path_or_url, layer=layer_name)
+    except Exception as e:
+        st.error(f"Failed to read file or layer: {e}")
+        return None
+
+def safe_to_crs(gdf, crs="EPSG:4326"):
+    try:
+        return gdf.to_crs(crs)
+    except Exception:
+        return gdf
 
 # -----------------------------------------------------------
 # SIDEBAR – DATA SOURCE
 # -----------------------------------------------------------
 st.sidebar.title("Data Source")
 
+load_mode = st.sidebar.radio(
+    "Load GPKG from",
+    ["Choose from list", "Custom URL"]
+)
+
 if load_mode == "Choose from list":
+
     labels = list(GPKG_OPTIONS.keys())
 
     # Safe default index
@@ -72,6 +101,11 @@ if load_mode == "Choose from list":
 
     gpkg_path = GPKG_OPTIONS[chosen_label]
 
+else:  # Custom URL
+    gpkg_path = st.sidebar.text_input("Enter remote GPKG URL", "https://.../file.gpkg")
+
+if not gpkg_path:
+    st.stop()
 
 # -----------------------------------------------------------
 # LOAD LAYERS
@@ -157,7 +191,6 @@ else:
 # -----------------------------------------------------------
 st.subheader("Interactive Map")
 
-# Center map
 try:
     c = filtered.geometry.unary_union.centroid
     center = [c.y, c.x]
@@ -172,7 +205,7 @@ map_tiles = st.sidebar.selectbox(
 m = folium.Map(location=center, zoom_start=8, tiles=map_tiles)
 
 # -----------------------------------------------------------
-# CHOROPLETH: Natural breaks and color ramps
+# CHOROPLETH
 # -----------------------------------------------------------
 cmap = None
 
@@ -200,7 +233,6 @@ if is_numeric and len(filtered) > 0:
     values = filtered[chosen_x].astype(float)
 
     try:
-        # Classification
         if method == "natural_breaks (Jenks)":
             classifier = mapclassify.NaturalBreaks(values, k=bins)
         elif method == "quantiles":
@@ -210,7 +242,6 @@ if is_numeric and len(filtered) > 0:
 
         filtered["_class"] = classifier.yb
 
-        # Colormap
         vmin, vmax = values.min(), values.max()
         cmap = getattr(cm.linear, palette_name).scale(vmin, vmax)
 
@@ -219,7 +250,6 @@ if is_numeric and len(filtered) > 0:
         filtered["_class"] = -1
         cmap = cm.LinearColormap(["#cccccc", "#cccccc"])
 
-# Style function
 def style_function(feature):
     value = feature["properties"].get(chosen_x)
     if cmap is None or value is None:
@@ -232,7 +262,6 @@ def style_function(feature):
         "fillOpacity": 0.85,
     }
 
-# Add GeoJSON
 popup_fields = st.multiselect(
     "Popup fields", columns_no_geom, default=columns_no_geom[:5]
 )
@@ -263,7 +292,6 @@ with colB:
     st.write("Describe")
     st.write(filtered.describe(include="all"))
 
-# Histogram
 if is_numeric:
     fig, ax = plt.subplots()
     filtered[chosen_x].plot.hist(ax=ax, bins=30)
@@ -286,5 +314,3 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
-
-
