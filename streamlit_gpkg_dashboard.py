@@ -318,8 +318,10 @@ st.download_button(
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
 
 # -----------------------------------------------------------
-# USER CAPEX INPUT + BCR CALCULATION
+# BEAUTIFUL DONUT CHART BCR CALCULATOR
 # -----------------------------------------------------------
+import matplotlib.pyplot as plt
+
 st.markdown("## Benefit–Cost Ratio (BCR) Calculator")
 
 # Load BCR.csv from HuggingFace
@@ -331,18 +333,17 @@ except Exception as e:
     st.error(f"Failed to load BCR.csv from HuggingFace: {e}")
     st.stop()
 
-# Extract scenario key (for matching in CSV)
+# Identify scenario
 scenario_key = extract_scenario_name(gpkg_path)
 
-# Find matching row
 matched = bcr_df[bcr_df["Skenario"].str.contains(scenario_key, case=False, na=False)]
 
 if matched.empty:
-    st.warning(f"No benefit record found in BCR.csv for: **{scenario_key}**")
+    st.warning(f"No BCR record found for: {scenario_key}")
 else:
     row = matched.iloc[0]
 
-    # Parse Indonesian currency formats
+    # Helper: convert Indonesian format → number
     def parse_rupiah(x):
         if isinstance(x, str):
             x = x.replace("Rp", "").replace(".", "").replace(",", "").strip()
@@ -351,34 +352,73 @@ else:
         except:
             return None
 
-    # Benefit from CSV
-    benefit_value = parse_rupiah(row["Benefit"])
+    benefit = parse_rupiah(row["Benefit"])
+    base_cost = parse_rupiah(row["Cost"])
 
-    # Baseline cost from CSV (optional)
-    cost_value = parse_rupiah(row.get("Cost", None))
+    # Baseline BCR
+    baseline_bcr = benefit / base_cost
 
-    st.write(f"**Benefit (from dataset):** Rp {benefit_value:,.0f}")
+    st.write(f"**Benefit:** Rp {benefit:,.0f}")
+    st.write(f"**Baseline Cost (CSV):** Rp {base_cost:,.0f}")
+    st.metric("Baseline BCR", f"{baseline_bcr:.3f}")
 
-    if cost_value:
-        baseline_bcr = benefit_value / cost_value
-        st.write(f"**Baseline CAPEX (from dataset):** Rp {cost_value:,.0f}")
-        st.metric("Baseline BCR", f"{baseline_bcr:.3f}")
+    st.markdown("---")
 
-    # CAPEX input from user
-    user_cost = st.text_input("Enter your estimated CAPEX (Rp)",
-                              placeholder="e.g. 1500000000000")
+    # -----------------------------------------------------------------
+    # FUNCTION: draw donut chart
+    # -----------------------------------------------------------------
+    def draw_donut(benefit_val, cost_val, bcr_value, label):
+        fig, ax = plt.subplots(figsize=(3.5, 3.5))
 
-    if user_cost:
-        user_cost_num = parse_rupiah(user_cost)
+        values = [benefit_val, cost_val]
+        colors = ["red", "black"]
 
-        if user_cost_num is None:
-            st.error("Invalid CAPEX format. Please enter a proper number.")
+        ax.pie(
+            values,
+            colors=colors,
+            startangle=90,
+            wedgeprops={"width": 0.35, "edgecolor": "white"},
+        )
+
+        ax.text(
+            0, 0,
+            f"BCR\n{bcr_value:.2f}",
+            ha="center", va="center",
+            fontsize=16, fontweight="bold"
+        )
+
+        ax.set_title(label, fontsize=14)
+        st.pyplot(fig)
+
+    # -----------------------------------------------------------------
+    # SHOW BASELINE DONUT
+    # -----------------------------------------------------------------
+    st.subheader("Baseline BCR (from dataset)")
+    draw_donut(benefit, base_cost, baseline_bcr, "Baseline BCR")
+
+    st.markdown("---")
+
+    # -----------------------------------------------------------------
+    # USER INPUT COST → UPDATED BCR DONUT
+    # -----------------------------------------------------------------
+    user_cost_string = st.text_input(
+        "Enter your estimated CAPEX (Rp)",
+        placeholder="e.g. 1500000000000"
+    )
+
+    if user_cost_string:
+        new_cost = parse_rupiah(user_cost_string)
+
+        if new_cost is None:
+            st.error("Invalid CAPEX format. Enter a number or Rp formatted input.")
         else:
-            new_bcr = benefit_value / user_cost_num
+            new_bcr = benefit / new_cost
 
-            st.subheader("Updated BCR using your CAPEX")
-            st.write(f"**Your CAPEX:** Rp {user_cost_num:,.0f}")
-            st.metric("New BCR", f"{new_bcr:.3f}")
+            st.subheader("Updated BCR (with your CAPEX)")
+            st.write(f"**Your Cost:** Rp {new_cost:,.0f}")
+
+            # Draw updated donut
+            draw_donut(benefit, new_cost, new_bcr, "Updated BCR")
 
 
 
