@@ -40,7 +40,7 @@ import matplotlib.pyplot as plt
 st.set_page_config(layout="wide", page_title="GPKG Explorer")
 
 # --- Constants / defaults ---
-DEFAULT_LOCAL_PATH = "/mnt/data/Impacts_aggregated_Current_2029_8percent_no_measures_DESA.gpkg"
+DEFAULT_LOCAL_PATH = "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/Impacts_aggregated_Current_2029_8percent_no_measures_DESA.gpkg"
 
 # --- Utilities ---
 @st.cache_data(show_spinner=False)
@@ -309,3 +309,4 @@ st.download_button(
 )
 
 st.success("Finished rendering. Use the controls on the left to change source, layer, and filters.")
+
