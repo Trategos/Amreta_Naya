@@ -1,9 +1,9 @@
 streamlit
-pydeck
-requests
 geopandas
-pyogrio
+fiona
 shapely
 rtree
-fiona
+pyogrio
 pandas
+leafmap
+gdown
