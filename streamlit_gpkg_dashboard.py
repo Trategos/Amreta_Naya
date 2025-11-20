@@ -86,7 +86,7 @@ def extract_scenario_name(gpkg_filename: str):
     → Current_2029_5percent_NBS_easternrivers
     """
     name = os.path.basename(gpkg_filename)
-    name = name.replace("Impacts_aggregated_", "").replace(".gpkg", "")
+    name = name.replace("Impacts_aggregated_", "").replace("_DESA.gpkg", "")
     return name
 
 # -----------------------------------------------------------
@@ -341,4 +341,5 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
 
