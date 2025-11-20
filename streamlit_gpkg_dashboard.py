@@ -371,7 +371,7 @@ else:
     def draw_donut(benefit_val, cost_val, bcr_value, title):
         labels = ["Benefit", "Cost"]
         values = [benefit_val, cost_val]
-        colors = ["red", "black"]
+        colors = ["green", "red"]
 
         fig = go.Figure(data=[go.Pie(
             labels=labels,
@@ -425,6 +425,7 @@ else:
             st.write(f"**Your Cost:** Rp {new_cost:,.0f}")
 
             draw_donut(benefit, new_cost, new_bcr, "Updated BCR")
+
 
 
 
