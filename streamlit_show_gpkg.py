@@ -1,88 +1,97 @@
 import streamlit as st
-import os
 import geopandas as gpd
-from folium import Map, GeoJson
+import folium
+from folium.plugins import Fullscreen
 from streamlit_folium import st_folium
-import requests
 import tempfile
+import requests
+from pathlib import Path
 
 st.set_page_config(page_title="GPKG Viewer", layout="wide")
 
-def download_from_gdrive(url):
-    """Download a Google Drive large file using file ID token."""
-    if "id=" in url:
-        file_id = url.split("id=")[1]
-    elif "/d/" in url:
-        file_id = url.split("/d/")[1].split("/")[0]
-    else:
-        raise ValueError("Invalid Google Drive link format.")
+st.title("📦 GPKG Viewer from GitHub LFS")
 
-    download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-
-    session = requests.Session()
-    response = session.get(download_url, stream=True)
-
-    # Handle large-file confirmation token
-    for key, value in response.cookies.items():
-        if key.startswith("download_warning"):
-            download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={value}"
-            response = session.get(download_url, stream=True)
-            break
-
-    # Save to temp file
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".gpkg")
-    with open(tmp.name, "wb") as f:
-        for chunk in response.iter_content(32768):
-            if chunk:
-                f.write(chunk)
-
-    return tmp.name
-
-
-def load_gpkg_layers(gpkg_path):
-    """Return list of layer names and the first layer GeoDataFrame."""
+# -----------------------------------------------------------
+# Function to download file from GitHub LFS (direct media link)
+# -----------------------------------------------------------
+def download_from_github_lfs(url):
     try:
-        layers = gpd.io.file.fiona.listlayers(gpkg_path)
-        return layers
+        st.info("Downloading file from GitHub LFS…")
+        r = requests.get(url, allow_redirects=True, stream=True)
+
+        if r.status_code != 200:
+            st.error(f"Failed to download file. HTTP Status: {r.status_code}")
+            return None
+
+        # Save to temporary file
+        tmp_path = Path(tempfile.gettempdir()) / "dataset.gpkg"
+        with open(tmp_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+
+        st.success(f"GPKG downloaded: {tmp_path}")
+        return str(tmp_path)
+
     except Exception as e:
-        st.error(f"❌ Failed to read layers: {e}")
+        st.error(f"❌ Error downloading file: {e}")
         return None
 
 
-def load_layer(gpkg_path, layer_name):
-    try:
-        return gpd.read_file(gpkg_path, layer=layer_name)
-    except Exception as e:
-        st.error(f"❌ Failed loading layer: {e}")
-        return None
+# -----------------------------------------------------------
+# GitHub LFS Link Input
+# -----------------------------------------------------------
+default_url = (
+    "https://media.githubusercontent.com/media/Trategos/Amreta_Naya/main/"
+    "Impacts_building_footprints_Current_2029_8percent_no_measures.gpkg"
+)
 
-
-st.title("🌍 GPKG File Viewer (Google Drive)")
-
-url = st.text_input("Enter Google Drive link:", 
-    "https://drive.google.com/file/d/1yXLhlEOvd7AVHc9-9n8ZjLFCLjCR1C6y/view?usp=drive_link")
+url = st.text_input("GitHub LFS GPKG URL:", value=default_url)
 
 if st.button("Load GPKG"):
-    with st.spinner("Downloading from Google Drive…"):
-        gpkg_path = download_from_gdrive(url)
+    gpkg_path = download_from_github_lfs(url)
 
-    st.success(f"GPKG downloaded: {gpkg_path}")
+    if gpkg_path:
+        try:
+            st.info("Reading GPKG layers…")
 
-    layers = load_gpkg_layers(gpkg_path)
+            # List layers safely
+            layers = gpd.io.file.fiona.listlayers(gpkg_path)
 
-    if layers:
-        st.success(f"Available layers: {layers}")
-        layer_name = st.selectbox("Select a layer", layers)
+            if not layers:
+                st.error("No layers found inside the GPKG.")
+                st.stop()
 
-        gdf = load_layer(gpkg_path, layer_name)
+            selected_layer = st.selectbox("Select layer:", layers)
 
-        if gdf is not None and not gdf.empty:
+            gdf = gpd.read_file(gpkg_path, layer=selected_layer)
+            st.success(f"Loaded layer: {selected_layer}")
 
-            center = [gdf.geometry.iloc[0].centroid.y, gdf.geometry.iloc[0].centroid.x]
-            m = Map(location=center, zoom_start=11)
+            # Show DataFrame preview
+            st.subheader("📊 Data Preview")
+            st.dataframe(gdf.head())
 
-            GeoJson(gdf).add_to(m)
+            # -----------------------------------------------------------
+            # MAP VIEWER
+            # -----------------------------------------------------------
+            st.subheader("🗺️ Map Viewer")
 
-            st_folium(m, width=1000, height=600)
-        else:
-            st.error("Layer loaded but empty or invalid.")
+            # Reproject to WGS84 for web mapping
+            if gdf.crs is not None and gdf.crs.to_epsg() != 4326:
+                gdf = gdf.to_crs(4326)
+
+            # Create map
+            centroid = gdf.geometry.iloc[0].centroid
+            m = folium.Map(location=[centroid.y, centroid.x], zoom_start=12)
+            Fullscreen().add_to(m)
+
+            folium.GeoJson(
+                gdf,
+                name="GPKG Layer",
+                tooltip=folium.GeoJsonTooltip(fields=gdf.columns[:5].tolist())
+            ).add_to(m)
+
+            st_folium(m, height=600, width=1200)
+
+        except Exception as e:
+            st.error(f"❌ Failed to read GPKG: {e}")
