@@ -207,6 +207,28 @@ else:
     sel = st.sidebar.multiselect(f"Select values in {chosen_x}", unique_vals)
     if sel:
         filtered = filtered[filtered[chosen_x].isin(sel)]
+# -----------------------------------------------------------
+# FLOOD EVENT VIDEO TOGGLE (LOCAL FIRST, HF FALLBACK)
+# -----------------------------------------------------------
+st.markdown("### Flood Event Animation")
+
+show_video = st.checkbox("▶ Show the Flood Event", value=False)
+
+VIDEO_LOCAL = "/mnt/data/Latest.mp4"
+VIDEO_HF = (
+    "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/"
+    "resolve/main/Latest.mp4"
+)
+
+if show_video:
+    if os.path.exists(VIDEO_LOCAL):
+        # Play local video
+        st.video(VIDEO_LOCAL, format="video/mp4")
+        st.caption("Flood event animation (local file).")
+    else:
+        # Play video from HuggingFace
+        st.video(VIDEO_HF)
+        st.caption("Flood event animation loaded from Hugging Face.")
 
 # -----------------------------------------------------------
 # MAP
@@ -425,6 +447,7 @@ else:
             st.write(f"**Your Cost:** Rp {new_cost:,.0f}")
 
             draw_donut(benefit, new_cost, new_bcr, "Updated BCR")
+
 
 
 
