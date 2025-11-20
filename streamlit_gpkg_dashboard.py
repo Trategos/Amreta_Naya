@@ -1,33 +1,3 @@
-"""
-Streamlit interactive dashboard for a GeoPackage (.gpkg)
-Updated to use HuggingFace-hosted GPKG as default source.
-
-Features:
-- Load GeoPackage from remote HuggingFace URL or manual URL
-- List available layers and let user pick one
-- Quick attribute table preview and column selection
-- Numeric / categorical filtering
-- Choropleth map with classification options
-- Popups and centroid overlays
-- Download filtered data as GeoJSON
-
-Run:
-    streamlit run streamlit_gpkg_dashboard.py
-
-Dependencies in requirements.txt:
-    streamlit
-    geopandas
-    fiona
-    folium
-    streamlit-folium
-    pandas
-    matplotlib
-    mapclassify
-    shapely
-    pyproj
-    rtree
-"""
-
 import streamlit as st
 import geopandas as gpd
 import pandas as pd
@@ -37,6 +7,8 @@ import os
 from streamlit_folium import st_folium
 import folium
 import matplotlib.pyplot as plt
+import mapclassify
+import branca.colormap as cm
 
 # -----------------------------------------------------------
 # CONFIG
@@ -59,6 +31,7 @@ def list_layers(path_or_url: str):
         st.warning(f"Could not list layers: {e}")
         return []
 
+
 @st.cache_data(show_spinner=True)
 def load_layer(path_or_url: str, layer_name: str = None):
     try:
@@ -70,6 +43,7 @@ def load_layer(path_or_url: str, layer_name: str = None):
     except Exception as e:
         st.error(f"Failed to read file or layer: {e}")
         return None
+
 
 def safe_to_crs(gdf, crs="EPSG:4326"):
     try:
@@ -119,7 +93,6 @@ with st.spinner("Loading selected layer…"):
 if gdf is None:
     st.stop()
 
-# Ensure geometries exist
 gdf = safe_to_crs(gdf)
 
 # -----------------------------------------------------------
@@ -153,7 +126,6 @@ columns = list(gdf.columns)
 columns_no_geom = [c for c in columns if c != gdf.geometry.name]
 
 chosen_x = st.sidebar.selectbox("Column for choropleth & analysis", columns_no_geom)
-
 is_numeric = pd.api.types.is_numeric_dtype(gdf[chosen_x])
 
 filtered = gdf.copy()
@@ -162,9 +134,7 @@ st.sidebar.write("### Filters")
 if is_numeric:
     minv = float(gdf[chosen_x].min())
     maxv = float(gdf[chosen_x].max())
-    rmin, rmax = st.sidebar.slider(
-        f"Filter {chosen_x}", minv, maxv, (minv, maxv)
-    )
+    rmin, rmax = st.sidebar.slider(f"Filter {chosen_x}", minv, maxv, (minv, maxv))
     filtered = filtered[(filtered[chosen_x] >= rmin) & (filtered[chosen_x] <= rmax)]
 else:
     unique_vals = sorted(filtered[chosen_x].dropna().unique().tolist())
@@ -197,29 +167,72 @@ map_tiles = st.sidebar.selectbox(
 
 m = folium.Map(location=center, zoom_start=8, tiles=map_tiles)
 
-# Choropleth (numeric only)
+# -----------------------------------------------------------
+# NEW — Natural Breaks + Blue→Red gradient styling
+# -----------------------------------------------------------
 if is_numeric and len(filtered) > 0:
-    method = st.sidebar.selectbox("Classification method", ["quantiles", "equal_interval"])
+
+    st.sidebar.write("### Choropleth Options")
+    method = st.sidebar.selectbox(
+        "Classification method",
+        ["natural_breaks (Jenks)", "quantiles", "equal_interval"],
+        index=0  # default = Jenks
+    )
+
     bins = st.sidebar.slider("Classes", 3, 9, 5)
 
     try:
-        if method == "quantiles":
-            filtered["_class"] = pd.qcut(filtered[chosen_x], bins, duplicates="drop").astype(str)
+        if method == "natural_breaks (Jenks)":
+            classifier = mapclassify.NaturalBreaks(filtered[chosen_x], k=bins)
+        elif method == "quantiles":
+            classifier = mapclassify.Quantiles(filtered[chosen_x], k=bins)
         else:
-            filtered["_class"] = pd.cut(filtered[chosen_x], bins).astype(str)
-    except Exception:
-        filtered["_class"] = "NA"
+            classifier = mapclassify.EqualInterval(filtered[chosen_x], k=bins)
 
-# Add GeoJSON with tooltip
+        filtered["_class"] = classifier.yb
+
+        # Blue → Red gradient color scale
+        cmap = cm.linear.Blues_09.to_Reds_09
+        cmap = cmap.scale(filtered[chosen_x].min(), filtered[chosen_x].max())
+
+    except Exception as e:
+        st.warning(f"Classification failed: {e}")
+        filtered["_class"] = -1
+        cmap = cm.LinearColormap(["grey", "grey"])
+
+else:
+    cmap = None
+
+# -----------------------------------------------------------
+# Add GeoJSON
+# -----------------------------------------------------------
 popup_fields = st.multiselect(
     "Popup fields", columns_no_geom, default=columns_no_geom[:5]
 )
 
-folium.GeoJson(
+def style_function(feature):
+    value = feature["properties"].get(chosen_x)
+
+    if (not is_numeric) or value is None:
+        return {"fillOpacity": 0.3, "weight": 0.5, "color": "black"}
+
+    return {
+        "fillColor": cmap(value),
+        "color": "black",
+        "weight": 0.25,
+        "fillOpacity": 0.8,
+    }
+
+gjson = folium.GeoJson(
     filtered.to_json(),
+    style_function=style_function,
     tooltip=folium.GeoJsonTooltip(fields=popup_fields),
     popup=folium.GeoJsonPopup(fields=popup_fields, labels=True),
 ).add_to(m)
+
+# add legend
+if cmap:
+    cmap.add_to(m)
 
 st_folium(m, width=1000, height=600)
 
@@ -227,8 +240,8 @@ st_folium(m, width=1000, height=600)
 # STATS & CHARTS
 # -----------------------------------------------------------
 st.subheader("Statistics & Charts")
-colA, colB = st.columns(2)
 
+colA, colB = st.columns(2)
 with colA:
     st.write("Preview (top 10)")
     st.dataframe(filtered.head(10))
@@ -247,6 +260,7 @@ if is_numeric:
 # DOWNLOAD
 # -----------------------------------------------------------
 st.subheader("Download filtered data")
+
 buffer = io.BytesIO()
 filtered.to_file(buffer, driver="GeoJSON")
 buffer.seek(0)
@@ -258,7 +272,4 @@ st.download_button(
     mime="application/geo+json",
 )
 
-st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
-
-
-
+st.success("Dashboard updated with Natural Breaks + Blue→Red gradient.")
