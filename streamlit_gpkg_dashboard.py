@@ -173,11 +173,11 @@ else:
 if html_content:
     # Add left padding to avoid cropping
     padded_html = f"""
-    <div style="padding-left: 40px; width:100%;">
+    <div style="padding-left: 80px; width:100%;">
     {html_content}
     </div>
     """
-    components.html(padded_html, width= 1500, height=600, scrolling=False)
+    components.html(padded_html, width= 2500, height=600, scrolling=False)
 else:
     st.info(f"No metrics file found for: {metrics_filename}")
 
@@ -339,6 +339,7 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
 
 
 
