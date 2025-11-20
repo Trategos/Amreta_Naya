@@ -22,14 +22,6 @@ st.set_page_config(layout="wide", page_title="GPKG Explorer")
 
 # Manually list the GPKG files you want to offer
 GPKG_OPTIONS = {
-    "2029 – 8% No Measures": (
-        "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
-        "Impacts_aggregated_Current_2029_8percent_no_measures_DESA.gpkg"
-    ),
-    "2029 – 5% No Measures": (
-        "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
-        "Impacts_aggregated_Current_2029_5percent_no_measures_DESA.gpkg"
-    ),
     "2029 – 8% NbS": (
         "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
         "Impacts_aggregated_Current_2029_8percent_NBS_easternrivers_DESA.gpkg"
@@ -314,3 +306,4 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
