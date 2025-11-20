@@ -1,18 +1,22 @@
 import streamlit as st
 import geopandas as gpd
-import leafmap.foliumap as leafmap
 import gdown
 import os
+import fiona
+import leafmap.foliumap as leafmap
 
 st.set_page_config(page_title="GPKG Live Dashboard", layout="wide")
 
+# Google Drive file ID (your file)
 FILE_ID = "1mm8RVDsImtHyal5h8UuCz4hOVCigolf2"
 OUTPUT_PATH = "/tmp/dataset.gpkg"
 
 st.title("📍 Live GPKG Dashboard from Google Drive")
-st.write("This app loads the GPKG file directly from Google Drive automatically.")
+st.write("Loads large GPKG directly from Google Drive (no upload needed).")
 
-# ---- DOWNLOAD FROM GOOGLE DRIVE ---- #
+# ------------------------------
+# DOWNLOAD FUNCTION
+# ------------------------------
 @st.cache_data(show_spinner=True)
 def download_gpkg():
     if os.path.exists(OUTPUT_PATH):
@@ -23,25 +27,34 @@ def download_gpkg():
 
     return OUTPUT_PATH
 
+
 st.info("Downloading file from Google Drive…")
+
 try:
     gpkg_path = download_gpkg()
     st.success(f"GPKG loaded: {gpkg_path}")
 
-    # ---- LIST GPKG LAYERS ---- #
-    layers = gpd.io.file.fiona.listlayers(gpkg_path)
-    st.subheader("📚 Layers Found")
+    # ------------------------------
+    # LIST LAYERS PROPERLY
+    # ------------------------------
+    layers = fiona.listlayers(gpkg_path)
+
+    st.subheader("📚 Layers Found in GPKG")
     st.write(layers)
 
-    layer_choice = st.selectbox("Choose a layer to display:", layers)
+    layer_choice = st.selectbox("Choose a layer:", layers)
 
-    # ---- LOAD SELECTED LAYER ---- #
+    # ------------------------------
+    # LOAD SELECTED LAYER
+    # ------------------------------
     gdf = gpd.read_file(gpkg_path, layer=layer_choice)
 
-    st.subheader("🔢 First Rows")
+    st.subheader("🔢 Data Preview")
     st.dataframe(gdf.head())
 
-    # ---- MAP ---- #
+    # ------------------------------
+    # MAP VIEWER
+    # ------------------------------
     st.subheader("🗺️ Map Viewer")
     m = leafmap.Map(center=[-2, 118], zoom=5)
     m.add_gdf(gdf, layer_name=layer_choice)
