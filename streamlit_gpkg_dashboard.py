@@ -318,9 +318,9 @@ st.download_button(
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
 
 # -----------------------------------------------------------
-# BEAUTIFUL DONUT CHART BCR CALCULATOR
+# BEAUTIFUL INTERACTIVE DONUT CHART BCR CALCULATOR
 # -----------------------------------------------------------
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
 st.markdown("## Benefit–Cost Ratio (BCR) Calculator")
 
@@ -333,17 +333,18 @@ except Exception as e:
     st.error(f"Failed to load BCR.csv from HuggingFace: {e}")
     st.stop()
 
-# Identify scenario
+# Identify scenario key to match with CSV
 scenario_key = extract_scenario_name(gpkg_path)
 
-matched = bcr_df[bcr_df["Skenario"].str.contains(scenario_key, case=False, na=False)]
+matched = bcr_df[bcr_df["Skenario"]
+                 .str.contains(scenario_key, case=False, na=False)]
 
 if matched.empty:
     st.warning(f"No BCR record found for: {scenario_key}")
 else:
     row = matched.iloc[0]
 
-    # Helper: convert Indonesian format → number
+    # Convert Rp text → number
     def parse_rupiah(x):
         if isinstance(x, str):
             x = x.replace("Rp", "").replace(".", "").replace(",", "").strip()
@@ -352,55 +353,61 @@ else:
         except:
             return None
 
+    # Extract from CSV
     benefit = parse_rupiah(row["Benefit"])
-    base_cost = parse_rupiah(row["Cost"])
+    baseline_bcr = float(row["BCR"])   # CSV already includes BCR
+    base_cost = benefit / baseline_bcr  # Derive cost
 
-    # Baseline BCR
-    baseline_bcr = benefit / base_cost
-
-    st.write(f"**Benefit:** Rp {benefit:,.0f}")
-    st.write(f"**Baseline Cost (CSV):** Rp {base_cost:,.0f}")
+    # Display baseline values
+    st.write(f"**Benefit (CSV):** Rp {benefit:,.0f}")
+    st.write(f"**Baseline Cost (derived):** Rp {base_cost:,.0f}")
     st.metric("Baseline BCR", f"{baseline_bcr:.3f}")
 
     st.markdown("---")
 
-    # -----------------------------------------------------------------
-    # FUNCTION: draw donut chart
-    # -----------------------------------------------------------------
-    def draw_donut(benefit_val, cost_val, bcr_value, label):
-        fig, ax = plt.subplots(figsize=(3.5, 3.5))
-
+    # -------------------------------------------------------
+    # INTERACTIVE DONUT CHART FUNCTION (Plotly)
+    # -------------------------------------------------------
+    def draw_donut(benefit_val, cost_val, bcr_value, title):
+        labels = ["Benefit", "Cost"]
         values = [benefit_val, cost_val]
         colors = ["red", "black"]
 
-        ax.pie(
-            values,
-            colors=colors,
-            startangle=90,
-            wedgeprops={"width": 0.35, "edgecolor": "white"},
+        fig = go.Figure(data=[go.Pie(
+            labels=labels,
+            values=values,
+            hole=0.55,
+            marker=dict(colors=colors),
+            hovertemplate="<b>%{label}</b><br>Rp %{value:,.0f}<extra></extra>",
+            textinfo="none"
+        )])
+
+        fig.add_annotation(
+            x=0.5, y=0.5,
+            text=f"<b>{bcr_value:.2f}</b>",
+            showarrow=False,
+            font=dict(size=22)
         )
 
-        ax.text(
-            0, 0,
-            f"BCR\n{bcr_value:.2f}",
-            ha="center", va="center",
-            fontsize=16, fontweight="bold"
+        fig.update_layout(
+            title=dict(text=title, x=0.5),
+            height=360, width=360,
+            margin=dict(l=10, r=10, t=50, b=10)
         )
 
-        ax.set_title(label, fontsize=14)
-        st.pyplot(fig)
+        st.plotly_chart(fig, use_container_width=False)
 
-    # -----------------------------------------------------------------
-    # SHOW BASELINE DONUT
-    # -----------------------------------------------------------------
+    # -------------------------------------------------------
+    # BASELINE DONUT
+    # -------------------------------------------------------
     st.subheader("Baseline BCR (from dataset)")
     draw_donut(benefit, base_cost, baseline_bcr, "Baseline BCR")
 
     st.markdown("---")
 
-    # -----------------------------------------------------------------
-    # USER INPUT COST → UPDATED BCR DONUT
-    # -----------------------------------------------------------------
+    # -------------------------------------------------------
+    # USER UPDATED BCR CALCULATION
+    # -------------------------------------------------------
     user_cost_string = st.text_input(
         "Enter your estimated CAPEX (Rp)",
         placeholder="e.g. 1500000000000"
@@ -410,15 +417,15 @@ else:
         new_cost = parse_rupiah(user_cost_string)
 
         if new_cost is None:
-            st.error("Invalid CAPEX format. Enter a number or Rp formatted input.")
+            st.error("Invalid CAPEX format. Enter a proper number or Rp text.")
         else:
             new_bcr = benefit / new_cost
 
             st.subheader("Updated BCR (with your CAPEX)")
             st.write(f"**Your Cost:** Rp {new_cost:,.0f}")
 
-            # Draw updated donut
             draw_donut(benefit, new_cost, new_bcr, "Updated BCR")
+
 
 
 
