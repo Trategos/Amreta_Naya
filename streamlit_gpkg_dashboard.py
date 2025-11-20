@@ -168,24 +168,16 @@ else:
     except:
         st.warning(f"Could not fetch metrics HTML for: {metrics_filename}")
 
-# 3️⃣ Auto-fit HTML + No scrollbars + Fix left cropping
+# 3️⃣ Show HTML (bigger box to prevent map layout issues)
+
 if html_content:
-    safe_html = html_content.replace('"', '&quot;')
-
-    iframe_html = f"""
-        <div style="padding-left: 40px; width:100%;">
-            <iframe id="metricsFrame"
-                srcdoc="{safe_html}"
-                style="width:100%; border:none; overflow:hidden;"
-                onload="
-                    this.style.height = 
-                        this.contentWindow.document.body.scrollHeight + 'px';
-                ">
-            </iframe>
-        </div>
+    # Add left padding to avoid cropping
+    padded_html = f"""
+    <div style="padding-left: 100px; width:100%;">
+    {html_content}
+    </div>
     """
-
-    components.html(iframe_html, height=2000, scrolling=False)
+    components.html(padded_html, height=900, scrolling=True)
 else:
     st.info(f"No metrics file found for: {metrics_filename}")
 
@@ -347,6 +339,7 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
 
 
 
