@@ -1,14 +1,13 @@
 """
 Streamlit interactive dashboard for a GeoPackage (.gpkg)
-Updated: Removed text search, fixed interactive color scaling,
-added natural breaks & color palettes.
+Rewritten: includes a stable vertical continuous colorbar legend (always visible).
 """
 
+import io
 import streamlit as st
 import geopandas as gpd
 import pandas as pd
 import fiona
-import io
 from streamlit_folium import st_folium
 import folium
 import matplotlib.pyplot as plt
@@ -26,7 +25,7 @@ DEFAULT_REMOTE_URL = (
 )
 
 # -----------------------------------------------------------
-# FUNCTIONS
+# UTIL FUNCTIONS
 # -----------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def list_layers(path_or_url: str):
@@ -49,6 +48,63 @@ def safe_to_crs(gdf, crs="EPSG:4326"):
         return gdf.to_crs(crs)
     except Exception:
         return gdf
+
+def add_vertical_colormap_to_map(map_obj, cmap, title, top_px=80, left_px=20, height_px=300, width_px=48):
+    """
+    Insert a fixed-position vertical colormap in the map's HTML. Uses the branca colormap _repr_html_().
+    This function rotates the colormap SVG to make it vertical and keeps labels readable.
+    """
+    # The _repr_html_() typically renders a horizontal SVG. We add CSS to rotate / size it and place it in a fixed div.
+    cmap_html = cmap._repr_html_()
+
+    legend_html = f"""
+    <div class="vertical-legend" style="
+        position: fixed;
+        top: {top_px}px;
+        left: {left_px}px;
+        z-index: 9999;
+        width: {width_px}px;
+        height: {height_px}px;
+        background-color: rgba(255,255,255,0.95);
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        padding: 6px;
+        box-shadow: 0 0 6px rgba(0,0,0,0.25);
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+    ">
+      <div style="text-align:center; font-weight:600; margin-bottom:6px;">{title}</div>
+
+      <div style="display:flex; align-items:center; justify-content:center; height:{height_px-40}px;">
+        {cmap_html}
+      </div>
+    </div>
+
+    <style>
+    /* Tweak the generated linear-colormap to display vertically */
+    .vertical-legend .linear-colormap {{
+        width: {height_px-60}px !important;    /* swap dims because we'll rotate */
+        height: {width_px-12}px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }}
+    .vertical-legend .linear-colormap svg {{
+        transform: rotate(-90deg);
+        transform-origin: left top;
+    }}
+    /* Reduce caption text size if present */
+    .vertical-legend .linear-colormap .caption {{
+        font-size: 10px !important;
+    }}
+    /* Hide any extra margins that could push widget outside the box */
+    .vertical-legend .linear-colormap svg rect, 
+    .vertical-legend .linear-colormap svg text {{
+        shape-rendering: crispEdges;
+    }}
+    </style>
+    """
+
+    map_obj.get_root().html.add_child(folium.Element(legend_html))
 
 
 # -----------------------------------------------------------
@@ -106,7 +162,10 @@ with col1:
 
 with col2:
     st.metric("Columns", len(gdf.columns))
-    geom_types = gdf.geometry.geom_type.value_counts().to_dict()
+    try:
+        geom_types = gdf.geometry.geom_type.value_counts().to_dict()
+    except Exception:
+        geom_types = {"unknown": len(gdf)}
     st.write("Geometry types:")
     for gt, ct in geom_types.items():
         st.write(f"- {gt}: {ct}")
@@ -135,8 +194,11 @@ st.sidebar.write("### Filters")
 
 # Numeric filtering
 if is_numeric:
-    minv = float(gdf[chosen_x].min())
-    maxv = float(gdf[chosen_x].max())
+    try:
+        minv = float(gdf[chosen_x].min())
+        maxv = float(gdf[chosen_x].max())
+    except Exception:
+        minv, maxv = 0.0, 1.0
     rmin, rmax = st.sidebar.slider(f"Filter {chosen_x}", minv, maxv, (minv, maxv))
     filtered = filtered[(filtered[chosen_x] >= rmin) & (filtered[chosen_x] <= rmax)]
 else:
@@ -168,6 +230,7 @@ m = folium.Map(location=center, zoom_start=8, tiles=map_tiles)
 # CHOROPLETH: Natural breaks and color ramps
 # -----------------------------------------------------------
 cmap = None
+classifier = None
 
 if is_numeric and len(filtered) > 0:
 
@@ -190,7 +253,8 @@ if is_numeric and len(filtered) > 0:
         index=0
     )
 
-    values = filtered[chosen_x].astype(float)
+    # Ensure numeric values (float) and ignore NaNs in classification
+    values = pd.to_numeric(filtered[chosen_x], errors="coerce").dropna().astype(float)
 
     try:
         # Classification
@@ -201,31 +265,48 @@ if is_numeric and len(filtered) > 0:
         else:
             classifier = mapclassify.EqualInterval(values, k=bins)
 
-        filtered["_class"] = classifier.yb
+        # Attach class index to the filtered dataframe (for potential discrete legend)
+        # We'll keep the style coloring via continuous colormap (so the map looks smooth)
+        filtered["_class"] = pd.to_numeric(filtered[chosen_x], errors="coerce").map(
+            lambda v: int(classifier.find_bin(v)) if pd.notna(v) else -1
+        )
 
-        # Colormap
-        vmin, vmax = values.min(), values.max()
+        # Continuous colormap (branca)
+        vmin, vmax = float(values.min()), float(values.max())
         cmap = getattr(cm.linear, palette_name).scale(vmin, vmax)
+        cmap.caption = chosen_x
 
     except Exception as e:
         st.warning(f"Classification failed: {e}")
         filtered["_class"] = -1
         cmap = cm.LinearColormap(["#cccccc", "#cccccc"])
+        cmap.caption = chosen_x
 
-# Style function
+# Style function: use chosen_x property's numeric value to get color from cmap
 def style_function(feature):
-    value = feature["properties"].get(chosen_x)
-    if cmap is None or value is None:
+    props = feature.get("properties", {})
+    raw_val = props.get(chosen_x)
+    try:
+        val = float(raw_val) if raw_val is not None else None
+    except Exception:
+        val = None
+
+    if val is None or cmap is None:
         return {"fillOpacity": 0.3, "color": "black", "weight": 0.3}
 
+    try:
+        fill_color = cmap(val)
+    except Exception:
+        fill_color = "#999999"
+
     return {
-        "fillColor": cmap(value),
+        "fillColor": fill_color,
         "color": "black",
         "weight": 0.25,
         "fillOpacity": 0.85,
     }
 
-# Add GeoJSON
+# Add GeoJSON layer
 popup_fields = st.multiselect(
     "Popup fields", columns_no_geom, default=columns_no_geom[:5]
 )
@@ -235,12 +316,18 @@ folium.GeoJson(
     style_function=style_function,
     tooltip=folium.GeoJsonTooltip(fields=popup_fields),
     popup=folium.GeoJsonPopup(fields=popup_fields, labels=True),
+    name=str(chosen_layer),
 ).add_to(m)
 
-if cmap:
-    cmap.add_to(m)
+# Add the stable vertical continuous legend (do NOT also call cmap.add_to(m))
+if cmap is not None and is_numeric:
+    add_vertical_colormap_to_map(m, cmap, title=chosen_x, top_px=80, left_px=20, height_px=300, width_px=48)
 
-st_folium(m, height=600, width=1000)
+# Add layer control
+folium.LayerControl().add_to(m)
+
+# Render map
+st_data = st_folium(m, height=600, width=1000)
 
 # -----------------------------------------------------------
 # STATS & CHARTS
@@ -259,7 +346,8 @@ with colB:
 # Histogram
 if is_numeric:
     fig, ax = plt.subplots()
-    filtered[chosen_x].plot.hist(ax=ax, bins=30)
+    # dropna to avoid plotting errors
+    filtered[chosen_x].dropna().astype(float).plot.hist(ax=ax, bins=30)
     ax.set_title(f"Histogram of {chosen_x}")
     st.pyplot(fig)
 
@@ -268,14 +356,17 @@ if is_numeric:
 # -----------------------------------------------------------
 st.subheader("Download filtered data")
 buffer = io.BytesIO()
-filtered.to_file(buffer, driver="GeoJSON")
-buffer.seek(0)
-
-st.download_button(
-    "Download filtered.geojson",
-    data=buffer,
-    file_name="filtered.geojson",
-    mime="application/geo+json",
-)
+# Save as GeoJSON to buffer
+try:
+    filtered.to_file(buffer, driver="GeoJSON")
+    buffer.seek(0)
+    st.download_button(
+        "Download filtered.geojson",
+        data=buffer,
+        file_name="filtered.geojson",
+        mime="application/geo+json",
+    )
+except Exception as e:
+    st.error(f"Failed to prepare download: {e}")
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
