@@ -20,48 +20,55 @@ from branca import colormap as cm
 # -----------------------------------------------------------
 st.set_page_config(layout="wide", page_title="GPKG Explorer")
 
-DEFAULT_REMOTE_URL = (
-    "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
-    "Impacts_aggregated_Current_2029_8percent_no_measures_DESA.gpkg"
-)
+# Manually list the GPKG files you want to offer
+GPKG_OPTIONS = {
+    "2029 – 8% No Measures": (
+        "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
+        "Impacts_aggregated_Current_2029_8percent_no_measures_DESA.gpkg"
+    ),
+    "2029 – 5% No Measures": (
+        "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
+        "Impacts_aggregated_Current_2029_5percent_no_measures_DESA.gpkg"
+    ),
+    "2029 – 8% NbS": (
+        "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
+        "Impacts_aggregated_Current_2029_8percent_NBS_easternrivers_DESA.gpkg"
+    ),
+    "2029 – 5% NbS": (
+        "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
+        "Impacts_aggregated_Current_2029_5percent_NBS_easternrivers_DESA.gpkg"
+    ),
+    "2029 – 8% Grey+Green": (
+        "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
+        "Impacts_aggregated_Current_2029_8percent_Strategi_BBWS_All_DESA.gpkg"
+    ),
+    "2029 – 5% Grey+Green": (
+        "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
+        "Impacts_aggregated_Current_2029_5percent_Strategi_BBWS_All_DESA.gpkg"
+    ),
+    # Add more manually:
+    # "Label": "url_to_file.gpkg",
+}
 
-# -----------------------------------------------------------
-# FUNCTIONS
-# -----------------------------------------------------------
-@st.cache_data(show_spinner=False)
-def list_layers(path_or_url: str):
-    try:
-        return fiona.listlayers(path_or_url)
-    except Exception as e:
-        st.warning(f"Could not list layers: {e}")
-        return []
-
-@st.cache_data(show_spinner=True)
-def load_layer(path_or_url: str, layer_name: str = None):
-    try:
-        return gpd.read_file(path_or_url, layer=layer_name)
-    except Exception as e:
-        st.error(f"Failed to read file or layer: {e}")
-        return None
-
-def safe_to_crs(gdf, crs="EPSG:4326"):
-    try:
-        return gdf.to_crs(crs)
-    except Exception:
-        return gdf
-
+# Optional: default selection
+DEFAULT_LABEL = "Digital Twin Flood Adaptation Planning"
 
 # -----------------------------------------------------------
 # SIDEBAR – DATA SOURCE
 # -----------------------------------------------------------
 st.sidebar.title("Data Source")
-load_mode = st.sidebar.radio("Load GPKG from", ["HuggingFace (default)", "Custom URL"])
 
-gpkg_path = (
-    st.sidebar.text_input("Remote GPKG URL", DEFAULT_REMOTE_URL)
-    if load_mode == "HuggingFace (default)"
-    else st.sidebar.text_input("Enter remote GPKG URL", "https://.../file.gpkg")
+load_mode = st.sidebar.radio(
+    "Load GPKG from",
+    ["Choose from list", "Custom URL"]
 )
+
+if load_mode == "Choose from list":
+    chosen_label = st.sidebar.selectbox("Select dataset", list(GPKG_OPTIONS.keys()), index=list(GPKG_OPTIONS.keys()).index(DEFAULT_LABEL))
+    gpkg_path = GPKG_OPTIONS[chosen_label]
+
+else:  # Custom URL
+    gpkg_path = st.sidebar.text_input("Enter remote GPKG URL", "https://.../file.gpkg")
 
 if not gpkg_path:
     st.stop()
@@ -279,3 +286,4 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
