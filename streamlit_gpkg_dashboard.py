@@ -124,7 +124,7 @@ else:
 # -----------------------------------------------------------
 # LOAD SELECTED LAYER
 # -----------------------------------------------------------
-st.title("GeoPackage (GPKG) Explorer — Interactive Dashboard")
+st.title("Amreta Naya Interactive Dashboard")
 
 with st.spinner("Loading selected layer…"):
     gdf = load_layer(gpkg_path, chosen_layer)
@@ -180,29 +180,6 @@ if html_content:
     components.html(padded_html, height=750, scrolling=True)
 else:
     st.info(f"No metrics file found for: {metrics_filename}")
-
-st.markdown("---")
-
-# -----------------------------------------------------------
-# TOP INFO
-# -----------------------------------------------------------
-col1, col2, col3 = st.columns([3, 1.5, 1.5])
-
-with col1:
-    st.subheader(f"Layer: {chosen_layer}")
-    st.write(f"Features: {len(gdf):,}")
-    st.write(f"CRS: {gdf.crs}")
-
-with col2:
-    st.metric("Columns", len(gdf.columns))
-    geom_types = gdf.geometry.geom_type.value_counts().to_dict()
-    st.write("Geometry types:")
-    for g, c in geom_types.items():
-        st.write(f"- {g}: {c}")
-
-with col3:
-    if st.button("Show attribute table (first 200 rows)"):
-        st.dataframe(gdf.head(200))
 
 st.markdown("---")
 
@@ -339,6 +316,7 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
 
 
 
