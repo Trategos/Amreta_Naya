@@ -168,16 +168,24 @@ else:
     except:
         st.warning(f"Could not fetch metrics HTML for: {metrics_filename}")
 
-# 3️⃣ Show HTML (if available)
-
+# 3️⃣ Auto-fit HTML + No scrollbars + Fix left cropping
 if html_content:
-    # Add left padding to avoid cropping
-    padded_html = f"""
-    <div style="padding-left: 80px; width:100%;">
-    {html_content}
-    </div>
+    safe_html = html_content.replace('"', '&quot;')
+
+    iframe_html = f"""
+        <div style="padding-left: 40px; width:100%;">
+            <iframe id="metricsFrame"
+                srcdoc="{safe_html}"
+                style="width:100%; border:none; overflow:hidden;"
+                onload="
+                    this.style.height = 
+                        this.contentWindow.document.body.scrollHeight + 'px';
+                ">
+            </iframe>
+        </div>
     """
-    components.html(padded_html, width= 2500, height=600, scrolling=False)
+
+    components.html(iframe_html, height=2000, scrolling=False)
 else:
     st.info(f"No metrics file found for: {metrics_filename}")
 
@@ -339,6 +347,7 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
 
 
 
