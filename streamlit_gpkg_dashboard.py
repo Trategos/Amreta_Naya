@@ -49,97 +49,55 @@ def safe_to_crs(gdf, crs="EPSG:4326"):
     except Exception:
         return gdf
 
-def add_vertical_colormap_to_map(
-    map_obj,
-    cmap,
-    title,
-    top_px=80,
-    left_px=20,
-    height_px=300,
-    width_px=48
-):
-    import json
+def add_vertical_colormap_to_map(map_obj, cmap, title="Legend", top_px=80, left_px=20):
+    import branca
+    import folium
 
-    # Extract gradient colors
-    steps = 40
-    colors = [cmap(x/steps) for x in range(steps + 1)]
-    css_gradient = ", ".join(colors)
-
-    vmin = round(cmap.vmin, 4)
-    vmax = round(cmap.vmax, 4)
+    # Build CSS gradient from colormap
+    n = 256
+    gradient_colors = [
+        f"rgb({int(r*255)}, {int(g*255)}, {int(b*255)})"
+        for r, g, b, a in (cmap(i/n) for i in range(n))
+    ]
+    css_gradient = ",".join(gradient_colors)
 
     legend_html = f"""
-    <style>
-    .draggable-legend {{
+    <div id="legend" style="
         position: fixed;
+        z-index: 9999;
         top: {top_px}px;
         left: {left_px}px;
-        z-index: 999999;
-        width: {width_px + 46}px;
-        background: white;
-        padding: 10px 8px;
-        border-radius: 10px;
-        border: 1px solid #bbb;
+        width: 60px;
+        padding: 10px 6px;
+        background: rgba(255,255,255,0.95);
+        border-radius: 14px;
         box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-        font-family: Arial, sans-serif;
-        text-align: center;
-        cursor: move;
-        user-select: none;
-    }}
-
-    .gradient-box {{
-        height: {height_px}px;
-        width: {width_px}px;
-        margin: 6px auto;
-        background: linear-gradient(to bottom, {css_gradient});
-        border-radius: 4px;
-        border: 1px solid #999;
-    }}
-
-    .legend-title {{
         font-size: 12px;
-        font-weight: bold;
-        margin-bottom: 4px;
-    }}
+    ">
+        <div style="font-weight:600; text-align:center; margin-bottom:6px;">
+            {title}
+        </div>
 
-    .legend-value {{
-        font-size: 11px;
-        margin-top: 4px;
-    }}
-    </style>
+        <div style="
+            width: 22px;
+            height: 260px;
+            margin: 0 auto;
+            border-radius: 6px;
+            border: 1px solid #999;
+            background: linear-gradient(to bottom, {css_gradient});
+        ">
+        </div>
 
-    <div id="legend" class="draggable-legend">
-        <div class="legend-title">{title}</div>
-        <div class="gradient-box"></div>
-        <div class="legend-value">{vmax}</div>
-        <div class="legend-value">{vmin}</div>
+        <div style="text-align:center; margin-top:6px; font-size:11px;">
+            Max
+        </div>
+        <div style="text-align:center; margin-top:2px; font-size:11px;">
+            Min
+        </div>
     </div>
-
-    <script>
-    const legend = document.getElementById("legend");
-    let offsetX, offsetY, isDown = false;
-
-    legend.addEventListener("mousedown", function(e) {{
-        isDown = true;
-        offsetX = legend.offsetLeft - e.clientX;
-        offsetY = legend.offsetTop - e.clientY;
-    }});
-
-    document.addEventListener("mouseup", function() {{
-        isDown = false;
-    }});
-
-    document.addEventListener("mousemove", function(e) {{
-        if (isDown) {{
-            legend.style.left = (e.clientX + offsetX) + "px";
-            legend.style.top = (e.clientY + offsetY) + "px";
-        }}
-    }});
-    </script>
     """
 
     map_obj.get_root().html.add_child(folium.Element(legend_html))
-
 
 # -----------------------------------------------------------
 # SIDEBAR – DATA SOURCE
@@ -353,9 +311,7 @@ folium.GeoJson(
     name=str(chosen_layer),
 ).add_to(m)
 
-# Add the stable vertical continuous legend (do NOT also call cmap.add_to(m))
-if cmap is not None and is_numeric:
-    add_vertical_colormap_to_map(m, cmap, title=chosen_x, top_px=80, left_px=20, height_px=300, width_px=48)
+add_vertical_colormap_to_map(m, cmap, title=chosen_x)
 
 # Add layer control
 folium.LayerControl().add_to(m)
@@ -404,5 +360,6 @@ except Exception as e:
     st.error(f"Failed to prepare download: {e}")
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
 
 
