@@ -21,7 +21,7 @@ import requests
 # -----------------------------------------------------------
 # CONFIG
 # -----------------------------------------------------------
-st.set_page_config(layout="wide", page_title="GPKG Explorer")
+st.set_page_config(layout="wide", page_title="Amreta Naya Dashboard")
 
 # Manually list the GPKG files you want to offer
 GPKG_OPTIONS = {
@@ -339,6 +339,7 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
+
 
 
 
