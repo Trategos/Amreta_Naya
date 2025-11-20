@@ -14,6 +14,8 @@ import folium
 import matplotlib.pyplot as plt
 import mapclassify
 from branca import colormap as cm
+import streamlit.components.v1 as components
+import os
 
 # -----------------------------------------------------------
 # CONFIG
@@ -22,6 +24,14 @@ st.set_page_config(layout="wide", page_title="GPKG Explorer")
 
 # Manually list the GPKG files you want to offer
 GPKG_OPTIONS = {
+    "2029 – 8% No Measures": (
+        "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
+        "Impacts_aggregated_Current_2029_8percent_no_measures_DESA.gpkg"
+    ),
+    "2029 – 5% No Measures": (
+        "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
+        "Impacts_aggregated_Current_2029_5percent_no_measures_DESA.gpkg"
+    ),
     "2029 – 8% NbS": (
         "https://huggingface.co/datasets/trategos/flood-gpkg-datasets/resolve/main/"
         "Impacts_aggregated_Current_2029_8percent_NBS_easternrivers_DESA.gpkg"
@@ -40,7 +50,7 @@ GPKG_OPTIONS = {
     ),
 }
 
-# Optional: default selection (must match a key or will fallback safely)
+# Default option must exist in GPKG_OPTIONS
 DEFAULT_LABEL = "2029 – 8% No Measures"
 
 # -----------------------------------------------------------
@@ -68,6 +78,17 @@ def safe_to_crs(gdf, crs="EPSG:4326"):
     except Exception:
         return gdf
 
+def extract_scenario_name(gpkg_filename: str):
+    """
+    Extract scenario from GPKG name.
+    Example:
+    Impacts_aggregated_Current_2029_5percent_NBS_easternrivers_DESA.gpkg
+    → Current_2029_5percent_NBS_easternrivers
+    """
+    name = os.path.basename(gpkg_filename)
+    name = name.replace("Impacts_aggregated_", "").replace("_DESA.gpkg", "")
+    return name
+
 # -----------------------------------------------------------
 # SIDEBAR – DATA SOURCE
 # -----------------------------------------------------------
@@ -81,8 +102,6 @@ load_mode = st.sidebar.radio(
 if load_mode == "Choose from list":
 
     labels = list(GPKG_OPTIONS.keys())
-
-    # Safe default index
     default_index = labels.index(DEFAULT_LABEL) if DEFAULT_LABEL in labels else 0
 
     chosen_label = st.sidebar.selectbox(
@@ -93,7 +112,7 @@ if load_mode == "Choose from list":
 
     gpkg_path = GPKG_OPTIONS[chosen_label]
 
-else:  # Custom URL
+else:
     gpkg_path = st.sidebar.text_input("Enter remote GPKG URL", "https://.../file.gpkg")
 
 if not gpkg_path:
@@ -126,6 +145,24 @@ if gdf is None:
     st.stop()
 
 gdf = safe_to_crs(gdf)
+
+# -----------------------------------------------------------
+# SHOW MATCHING METRICS HTML
+# -----------------------------------------------------------
+scenario_name = extract_scenario_name(gpkg_path)
+metrics_filename = f"{scenario_name}_metrics.html"
+local_html_path = f"/mnt/data/{metrics_filename}"
+
+st.markdown("## Scenario Metrics")
+
+if os.path.exists(local_html_path):
+    with open(local_html_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    components.html(html_content, height=450, scrolling=True)
+else:
+    st.info(f"No metrics file found for: {metrics_filename}")
+
+st.markdown("---")
 
 # -----------------------------------------------------------
 # TOP INFO
@@ -202,7 +239,6 @@ m = folium.Map(location=center, zoom_start=8, tiles=map_tiles)
 cmap = None
 
 if is_numeric and len(filtered) > 0:
-
     st.sidebar.markdown("### Choropleth Options")
 
     method = st.sidebar.selectbox(
@@ -246,7 +282,6 @@ def style_function(feature):
     value = feature["properties"].get(chosen_x)
     if cmap is None or value is None:
         return {"fillOpacity": 0.3, "color": "black", "weight": 0.3}
-
     return {
         "fillColor": cmap(value),
         "color": "black",
@@ -306,4 +341,3 @@ st.download_button(
 )
 
 st.success("Dashboard ready. Adjust filters in the sidebar to explore the data.")
-
